@@ -2,8 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Sparkles, X, Settings, Send, Loader2, Wrench, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { hasLlm, chatStream, type ChatMsg } from "@/lib/llm";
-import { ApiError } from "@/lib/api";
+import { hasLlm, type ChatMsg } from "@/lib/llm";
+import { useAskAi } from "@/hooks/useAskAi";
 import { SaveNoteButton } from "@/components/ui/SaveNoteButton";
 
 interface Props {
@@ -37,59 +37,43 @@ export function AskAiButton({ context, suggestions = [], label = "问 AI", conte
   const [configured, setConfigured] = useState(false);
   const [msgs, setMsgs] = useState<(ChatMsg & { tools?: ToolUse[] })[]>([]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { ask, streaming, error, abort, clearError } = useAskAi();
   const scrollRef = useRef<HTMLDivElement>(null);
-  // 在跑的流式请求：关面板/换问题时中止，省用户的订阅/API 额度，也防迟到 chunk 写进新气泡
-  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (open) setConfigured(hasLlm());
   }, [open]);
 
-  useEffect(() => () => abortRef.current?.abort(), []); // 组件卸载兜底
+  useEffect(() => () => abort(), [abort]);
 
   const close = () => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setLoading(false);
+    abort();
     setOpen(false);
   };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [msgs, loading]);
+  }, [msgs, streaming]);
 
   const send = async (text: string) => {
     const q = text.trim();
-    if (!q || loading) return;
+    if (!q || streaming) return;
     setInput("");
-    setErr(null);
+    clearError();
     const history: ChatMsg[] = [...msgs.map(({ role, content }) => ({ role, content })), { role: "user", content: q }];
-    // 先放用户气泡 + 一个空的 assistant 气泡，流式往里填。
     setMsgs((m) => [...m, { role: "user", content: q }, { role: "assistant", content: "", tools: [] }]);
-    setLoading(true);
-    // 更新「最后一条 assistant 气泡」（不可变）。
     const patchLast = (fn: (msg: ChatMsg & { tools?: ToolUse[] }) => ChatMsg & { tools?: ToolUse[] }) =>
       setMsgs((m) => m.map((msg, i) => (i === m.length - 1 && msg.role === "assistant" ? fn(msg) : msg)));
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-    // 只有仍是「当前这次请求」才允许写 UI——旧请求的迟到 chunk 直接丢弃
-    const alive = () => abortRef.current === ac && !ac.signal.aborted;
     try {
-      await chatStream(history, context, {
-        onTool: (tool, args) => { if (alive()) patchLast((msg) => ({ ...msg, tools: [...(msg.tools || []), { name: tool, arg: argStr(args) }] })); },
-        onDelta: (t) => { if (alive()) patchLast((msg) => ({ ...msg, content: msg.content + t })); },
-      }, ac.signal);
+      await ask(history, context, {
+        onTool: (tool, args) => patchLast((msg) => ({ ...msg, tools: [...(msg.tools || []), { name: tool, arg: argStr(args) }] })),
+        onDelta: (t) => patchLast((msg) => ({ ...msg, content: msg.content + t })),
+      });
     } catch (e) {
-      // 出错/中止：去掉尾部空 assistant 气泡；主动中止不算错误，不提示
       setMsgs((m) => m.filter((msg, i) => !(i === m.length - 1 && msg.role === "assistant" && !msg.content)));
-      if (!ac.signal.aborted) setErr(e instanceof ApiError ? e.message : "对话失败");
-    } finally {
-      if (abortRef.current === ac) {
-        abortRef.current = null;
-        setLoading(false);
+      // 主动中止不算错误；useAskAi 已处理 error 状态
+      if (!(e instanceof DOMException && e.name === "AbortError")) {
+        // error 已由 hook 设置
       }
     }
   };
@@ -118,7 +102,6 @@ export function AskAiButton({ context, suggestions = [], label = "问 AI", conte
             </div>
 
             {!configured ? (
-              // 未接入 AI：引导去设置
               <div className="flex-1 space-y-4 overflow-auto p-4 text-sm">
                 <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs text-muted-foreground">
                   分析结论由你自己配置的 AI 给出，本产品只负责把本页数据打包成上下文、并让 AI 能调数据工具，
@@ -135,7 +118,6 @@ export function AskAiButton({ context, suggestions = [], label = "问 AI", conte
                 </Link>
               </div>
             ) : (
-              // 已接入：真对话
               <>
                 <div ref={scrollRef} className="flex-1 space-y-3 overflow-auto p-4 text-sm">
                   {msgs.length === 0 && (
@@ -161,20 +143,20 @@ export function AskAiButton({ context, suggestions = [], label = "问 AI", conte
                           </div>
                         )}
                         <p className="whitespace-pre-wrap">{m.content}</p>
-                        {m.role === "assistant" && m.content && !(loading && i === msgs.length - 1) && (
+                        {m.role === "assistant" && m.content && !(streaming && i === msgs.length - 1) && (
                           <div className="mt-1.5"><SaveNoteButton kind="问AI" title={`问 AI · ${msgs[i - 1]?.content?.slice(0, 24) || "对话"}`} content={m.content} contextCode={contextCode} /></div>
                         )}
                       </div>
                     </div>
                   ))}
-                  {loading && (
+                  {streaming && (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" /> AI 正在思考 / 调取数据…
                     </div>
                   )}
-                  {err && (
+                  {error && (
                     <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0" /> {err}
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" /> {error}
                     </div>
                   )}
                   {msgs.length === 0 && suggestions.length > 0 && (
@@ -198,7 +180,7 @@ export function AskAiButton({ context, suggestions = [], label = "问 AI", conte
                       placeholder="就本页内容提问…"
                       className="flex-1 resize-none rounded-lg border border-border bg-black/20 px-3 py-2 text-sm outline-none focus:border-primary/50"
                     />
-                    <button onClick={() => send(input)} disabled={loading || !input.trim()}
+                    <button onClick={() => send(input)} disabled={streaming || !input.trim()}
                       className="rounded-lg bg-primary/15 p-2 text-primary hover:bg-primary/25 disabled:opacity-40">
                       <Send className="h-4 w-4" />
                     </button>

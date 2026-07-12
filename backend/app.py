@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import astock
 import chat as chat_layer
@@ -720,5 +721,22 @@ def industry(top: int = Query(20, ge=5, le=50)):
 
 # 生产模式：Docker 或 npm run build 后，同端口托管前端 dist（开发仍走 Vite :5899 代理）。
 _DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+
+class SPAStaticFiles(StaticFiles):
+    """SPA fallback：无真实静态文件时回退 index.html，供 React Router 处理深链刷新。"""
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            # 带扩展名的路径（.js/.css/.svg）是真缺失，保持 404
+            if path and "." in path.rsplit("/", 1)[-1]:
+                raise
+            return await super().get_response("index.html", scope)
+
+
 if _DIST.is_dir():
-    app.mount("/", StaticFiles(directory=_DIST, html=True), name="static")
+    app.mount("/", SPAStaticFiles(directory=_DIST, html=True), name="static")

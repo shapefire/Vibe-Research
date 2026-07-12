@@ -12,6 +12,14 @@ _TEST_DATA_DIR = tempfile.mkdtemp(prefix="vr-test-data-")
 os.environ["VR_DATA_DIR"] = _TEST_DATA_DIR
 os.environ["VR_REPORTS_DIR"] = os.path.join(_TEST_DATA_DIR, "myreports")
 
+# 确保 frontend/dist 存在，供 SPA fallback 测试（app import 时决定是否挂载静态文件）
+_DIST_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+os.makedirs(_DIST_DIR, exist_ok=True)
+_INDEX_HTML = os.path.join(_DIST_DIR, "index.html")
+if not os.path.isfile(_INDEX_HTML):
+    with open(_INDEX_HTML, "w", encoding="utf-8") as f:
+        f.write("<!doctype html><html><body><div id=\"root\"></div></body></html>")
+
 
 def pytest_configure(config):
     config.addinivalue_line(

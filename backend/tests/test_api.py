@@ -141,3 +141,25 @@ def test_gstock_quote_full_null_shape():
     q = gstock._quote_from({})
     assert set(q) == {"code", "name", "price", "open", "high", "low", "prev_close", "amount", "mcap", "change_pct"}
     assert all(v is None for v in q.values())
+
+
+@pytest.mark.parametrize("path", ["/daily-review", "/stock-data", "/sectors/business-space"])
+def test_spa_deep_link_fallback(path):
+    """Docker 部署：刷新深链路由应回退 index.html，而非 FastAPI 404 JSON。"""
+    r = client.get(path)
+    assert r.status_code == 200
+    assert "text/html" in r.headers.get("content-type", "")
+    assert 'id="root"' in r.text
+
+
+def test_spa_missing_asset_returns_404():
+    """缺失的 .js 资源仍返回真实 404，不走 SPA fallback。"""
+    r = client.get("/assets/not-exist.js")
+    assert r.status_code == 404
+
+
+def test_spa_fallback_does_not_override_api():
+    """SPA 挂载不影响 /api/* 路由。"""
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
