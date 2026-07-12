@@ -36,6 +36,34 @@ export interface MyReport {
   id: string; name: string; industry: string; size: number; ext: string; ts: number;
 }
 
+export interface NoteMeta {
+  id: string; kind: string; title: string; ts: number;
+  tags?: string[]; snapshot?: NoteSnapshot | null;
+}
+
+export interface NoteDetail extends NoteMeta {
+  content: string;
+}
+
+export interface NoteList {
+  items: NoteMeta[];
+  total: number;
+}
+
+export interface NoteSnapshot {
+  code?: string;
+  quote?: { price: number; pe_ttm?: number; change_pct?: number };
+  valuation?: { pe_ttm?: number; pb?: number; mcap_yi?: number };
+  valuation_pctile?: { pe_5y?: number; pb_5y?: number };
+  captured_at: string;
+}
+
+export interface MigrateResult {
+  imported: number;
+  skipped: number;
+  total: number;
+}
+
 // 下载/预览研报：带鉴权头 fetch → blob → 触发浏览器下载（<a download> 无法带 Authorization，故走 blob）。
 export async function downloadReport(id: string, name: string): Promise<void> {
   const resp = await fetch(`/api/myreports/file/${id}`, { headers: authHeaders() });
@@ -353,4 +381,19 @@ export const api = {
   uploadReport: (name: string, contentB64: string) =>
     request<MyReport>("/myreports", "POST", { name, content_b64: contentB64 }),
   deleteReport: (id: string) => request<{ ok: boolean }>(`/myreports/${id}`, "DELETE"),
+  notes: (params?: { kind?: string; q?: string; limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.q) qs.set("q", params.q);
+    if (params?.limit != null) qs.set("limit", String(params.limit));
+    if (params?.offset != null) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return get<NoteList>(`/notes${q ? `?${q}` : ""}`);
+  },
+  note: (id: string) => get<NoteDetail>(`/notes/${id}`),
+  createNote: (body: { kind: string; title: string; content: string; tags?: string[]; snapshot?: NoteSnapshot | null }) =>
+    request<NoteMeta>("/notes", "POST", body),
+  deleteNote: (id: string) => request<{ ok: boolean; id: string }>(`/notes/${id}`, "DELETE"),
+  deleteAllNotes: () => request<{ ok: boolean; count: number }>("/notes", "DELETE"),
+  migrateNotes: (notes: NoteDetail[]) => request<MigrateResult>("/notes/migrate", "POST", { notes }),
 };

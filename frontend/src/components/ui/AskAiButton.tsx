@@ -11,6 +11,7 @@ interface Props {
   context: string;
   suggestions?: string[];
   label?: string;
+  contextCode?: string;
 }
 
 const TOOL_LABEL: Record<string, string> = {
@@ -31,7 +32,7 @@ interface ToolUse { name: string; arg: string }
 
 // 「问 AI」入口 —— 把当前分栏内容作为上下文，调用户自己配置的模型；
 // AI 可自行调 A股数据工具作答。结论由用户模型给出，本产品不校准、不负责。
-export function AskAiButton({ context, suggestions = [], label = "问 AI" }: Props) {
+export function AskAiButton({ context, suggestions = [], label = "问 AI", contextCode }: Props) {
   const [open, setOpen] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [msgs, setMsgs] = useState<(ChatMsg & { tools?: ToolUse[] })[]>([]);
@@ -161,7 +162,7 @@ export function AskAiButton({ context, suggestions = [], label = "问 AI" }: Pro
                         )}
                         <p className="whitespace-pre-wrap">{m.content}</p>
                         {m.role === "assistant" && m.content && !(loading && i === msgs.length - 1) && (
-                          <div className="mt-1.5"><SaveNoteButton kind="问AI" title={`问 AI · ${msgs[i - 1]?.content?.slice(0, 24) || "对话"}`} content={m.content} /></div>
+                          <div className="mt-1.5"><SaveNoteButton kind="问AI" title={`问 AI · ${msgs[i - 1]?.content?.slice(0, 24) || "对话"}`} content={m.content} contextCode={contextCode} /></div>
                         )}
                       </div>
                     </div>

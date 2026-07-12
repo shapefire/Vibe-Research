@@ -30,6 +30,7 @@ import newsradar
 import portfolio as pf
 import market
 import myreports as mr
+import notes as notes_mod
 
 app = FastAPI(title="Vibe-Research API", version="0.1.3")
 
@@ -241,6 +242,76 @@ def myreports_file(rid: str):
 @app.delete("/api/myreports/{rid}")
 def myreports_delete(rid: str):
     return {"data": {"ok": mr.delete_report(rid)}}
+
+
+# ---- 研究记录（用户主动保存的 AI 复盘/要点/问答，存本地、不上传）----
+
+class NoteIn(BaseModel):
+    kind: str
+    title: str
+    content: str
+    tags: list[str] = []
+    snapshot: dict | None = None
+
+
+class MigrateIn(BaseModel):
+    notes: list[dict]
+
+
+@app.get("/api/notes")
+def notes_list(
+    kind: str | None = None,
+    q: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    return {"data": notes_mod.list_notes(kind=kind, q=q, limit=limit, offset=offset)}
+
+
+@app.post("/api/notes/migrate")
+def notes_migrate(body: MigrateIn):
+    """从 localStorage 批量导入研究记录（一次性迁移）。"""
+    try:
+        return {"data": notes_mod.migrate_notes(body.notes)}
+    except notes_mod.NoteError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.delete("/api/notes")
+def notes_delete_all():
+    """清空所有研究记录。"""
+    return {"data": notes_mod.delete_all_notes()}
+
+
+@app.get("/api/notes/{note_id}")
+def notes_get(note_id: str):
+    try:
+        return {"data": notes_mod.get_note(note_id)}
+    except notes_mod.NoteError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@app.post("/api/notes")
+def notes_create(n: NoteIn):
+    try:
+        return {"data": notes_mod.add_note(
+            kind=n.kind,
+            title=n.title,
+            content=n.content,
+            tags=n.tags,
+            snapshot=n.snapshot,
+        )}
+    except notes_mod.CapacityExceeded as e:
+        raise HTTPException(409, str(e)) from e
+    except notes_mod.NoteError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.delete("/api/notes/{note_id}")
+def notes_delete(note_id: str):
+    if not notes_mod.delete_note(note_id):
+        raise HTTPException(404, "笔记不存在")
+    return {"data": {"ok": True, "id": note_id}}
 
 
 class CloseIn(BaseModel):

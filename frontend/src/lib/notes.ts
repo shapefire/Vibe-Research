@@ -1,18 +1,24 @@
-// 研究记录（沉淀）—— 把 AI 复盘 / 今日要点 / 问 AI 的结果存本地，形成个人投研记录。
-// 只存本地 localStorage，不上传、不进仓库。对应投研框架第 7 层「沉淀」。
+// 研究记录（沉淀）—— 把 AI 复盘 / 今日要点 / 问 AI 的结果存本地服务，形成个人投研记录。
+// 数据存 ~/.vibe-research/notes/，不上传、不进仓库。对应投研框架第 7 层「沉淀」。
+
+import { api, type NoteSnapshot } from "./api";
+
+export type { NoteSnapshot };
 
 export interface Note {
   id: string;
   kind: string;   // 复盘 / 今日要点 / 问AI
-  title: string;  // 如「每日复盘 2026-07-04」「AI 算力 今日要点」「问 AI · 600519」
-  content: string; // markdown 正文
-  ts: number;      // 保存时间戳(ms)
+  title: string;
+  content: string; // markdown 正文（列表加载时可能为空，展开后懒加载）
+  ts: number;
+  tags?: string[];
+  snapshot?: NoteSnapshot | null;
 }
 
 const KEY = "vr-notes";
-const MAX = 200;
+const MIGRATED_KEY = "vr-notes-migrated";
 
-export function loadNotes(): Note[] {
+function loadLegacyNotes(): Note[] {
   try {
     const v = JSON.parse(localStorage.getItem(KEY) || "[]");
     return Array.isArray(v) ? v : [];
@@ -21,30 +27,50 @@ export function loadNotes(): Note[] {
   }
 }
 
-function persist(notes: Note[]) {
-  localStorage.setItem(KEY, JSON.stringify(notes.slice(0, MAX)));
+export async function loadNotes(): Promise<Note[]> {
+  const { items } = await api.notes({ limit: 500 });
+  return items.map((m) => ({
+    id: m.id,
+    kind: m.kind,
+    title: m.title,
+    content: "",
+    ts: m.ts,
+    tags: m.tags,
+    snapshot: m.snapshot,
+  }));
 }
 
-// 新记录置顶。返回更新后的完整列表。
-export function addNote(kind: string, title: string, content: string): Note[] {
-  const note: Note = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    kind,
-    title,
-    content,
-    ts: Date.now(),
-  };
-  const next = [note, ...loadNotes()];
-  persist(next);
-  return next;
+export async function addNote(
+  kind: string,
+  title: string,
+  content: string,
+  snapshot?: NoteSnapshot | null,
+): Promise<Note[]> {
+  const tags = snapshot?.code ? [snapshot.code] : [];
+  await api.createNote({ kind, title, content, tags, snapshot: snapshot ?? undefined });
+  return loadNotes();
 }
 
-export function deleteNote(id: string): Note[] {
-  const next = loadNotes().filter((n) => n.id !== id);
-  persist(next);
-  return next;
+export async function deleteNote(id: string): Promise<Note[]> {
+  await api.deleteNote(id);
+  return loadNotes();
 }
 
-export function clearNotes() {
-  localStorage.removeItem(KEY);
+export async function clearNotes(): Promise<void> {
+  await api.deleteAllNotes();
+}
+
+/** 首次加载时从 localStorage 迁移到服务端（幂等）。返回导入条数，0 表示无需迁移。 */
+export async function migrateIfNeeded(): Promise<number> {
+  if (localStorage.getItem(MIGRATED_KEY) === "true") return 0;
+  const legacy = loadLegacyNotes();
+  if (legacy.length === 0) {
+    localStorage.setItem(MIGRATED_KEY, "true");
+    return 0;
+  }
+  const result = await api.migrateNotes(legacy);
+  if (result.imported > 0 || result.skipped === legacy.length) {
+    localStorage.setItem(MIGRATED_KEY, "true");
+  }
+  return result.imported;
 }
