@@ -10,6 +10,25 @@ CODE = "600519"  # 贵州茅台，流动性好、常年有数据
 
 
 @pytest.mark.live
+def test_fetch_quote_live_shape():
+    """经 fallback chain 拉行情，结构与 tencent 一致。"""
+    result = astock.fetch_quote([CODE])
+    q = result.data.get(CODE)
+    assert q and isinstance(q["price"], float) and q["name"]
+    assert result.source == "tencent"
+    assert result.stale is False
+
+
+@pytest.mark.live
+def test_health_sources_live_shape():
+    """health/sources 端点结构（经 registry 序列化）。"""
+    from data_fetcher.registry import registry
+    body = registry.to_dict()
+    assert "sources" in body and "chains" in body
+    assert "quote" in body["chains"]
+
+
+@pytest.mark.live
 def test_quote_shape():
     q = astock.tencent_quote([CODE]).get(CODE)
     assert q and isinstance(q["price"], float) and q["name"]

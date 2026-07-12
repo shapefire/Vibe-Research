@@ -88,10 +88,15 @@ def _parse_gtimg(data: str) -> dict[str, dict]:
     return result
 
 
-def tencent_quote(codes: list[str]) -> dict[str, dict]:
+def _fetch_quote_tencent(codes: list[str]) -> dict[str, dict]:
     """批量个股实时行情：现价 / 涨跌 / PE / PB / 市值 / 换手 / 涨跌停。"""
     prefixed = [f"{get_prefix(c)}{c}" for c in codes]
     return _parse_gtimg(_fetch_gtimg(prefixed))
+
+
+def tencent_quote(codes: list[str]) -> dict[str, dict]:
+    """向后兼容别名，直接调腾讯源（不经 fallback chain）。"""
+    return _fetch_quote_tencent(codes)
 
 
 # A股大盘指数（前缀规则与个股不同，固定带前缀代码）
@@ -200,11 +205,16 @@ def profit_forecast(code: str) -> list[dict]:
     return df.to_dict("records") if df is not None and not df.empty else []
 
 
-def stock_news(code: str, limit: int = 20) -> list[dict]:
-    """个股新闻（东财）。"""
+def _fetch_news(code: str, limit: int = 20) -> list[dict]:
+    """个股新闻（东财 akshare）。"""
     ak = _akshare()
     df = ak.stock_news_em(symbol=code)
     return df.head(limit).to_dict("records") if df is not None and not df.empty else []
+
+
+def stock_news(code: str, limit: int = 20) -> list[dict]:
+    """向后兼容别名。"""
+    return _fetch_news(code, limit=limit)
 
 
 def individual_info(code: str) -> dict:
@@ -260,11 +270,16 @@ def _mootdx_client():
         raise DependencyMissing("mootdx 未安装：pip install mootdx") from e
 
 
-def kline(code: str, category: int = 4, offset: int = 60) -> list[dict]:
+def _fetch_kline(code: str, category: int = 4, offset: int = 60) -> list[dict]:
     """K线：category 4=日 5=周 6=月 11=60分钟。"""
     client = _mootdx_client()
     df = client.bars(symbol=code, category=category, offset=offset)
     return df.to_dict("records") if df is not None and not df.empty else []
+
+
+def kline(code: str, category: int = 4, offset: int = 60) -> list[dict]:
+    """向后兼容别名。"""
+    return _fetch_kline(code, category=category, offset=offset)
 
 
 def finance(code: str) -> dict:
@@ -814,3 +829,26 @@ def industry_comparison(top_n: int = 20) -> dict:
         "code": it.get("f12", ""), "up_count": it.get("f104", 0), "down_count": it.get("f105", 0),
     } for i, it in enumerate(items)]
     return {"top": rows[:top_n], "bottom": rows[-top_n:], "total": len(rows)}
+
+
+# ---------------------------------------------------------------------------
+# 公开 API：经 data_fetcher chain 拉取（含 fallback）
+# ---------------------------------------------------------------------------
+
+from data_fetcher.base import FetchResult  # noqa: E402
+from data_fetcher.kline import KLINE_CHAIN  # noqa: E402
+from data_fetcher.news import NEWS_CHAIN  # noqa: E402
+from data_fetcher.quote import QUOTE_CHAIN  # noqa: E402
+
+
+def fetch_quote(codes: list[str]) -> FetchResult:
+    return QUOTE_CHAIN.fetch(codes)
+
+
+def fetch_kline(code: str, category: int = 4, offset: int = 60) -> FetchResult:
+    return KLINE_CHAIN.fetch(code, category=category, offset=offset)
+
+
+def fetch_news(code: str, limit: int = 20) -> FetchResult:
+    return NEWS_CHAIN.fetch(code, limit=limit)
+

@@ -23,6 +23,8 @@ from pydantic import BaseModel
 import astock
 import chat as chat_layer
 import cli_runtime
+from data_fetcher.base import AllSourcesFailed, FetchResult
+from data_fetcher.registry import registry
 import gstock
 import newsradar
 import portfolio as pf
@@ -47,6 +49,7 @@ app.add_middleware(
 # 可选鉴权：设了 VR_API_KEY 就要求所有 /api/* 带 `Authorization: Bearer <key>`
 #   （本地自托管不设=开放；公网部署务必设，否则别人能读你的持仓/调你的后端）。
 _API_KEY = os.environ.get("VR_API_KEY", "").strip()
+_HEALTH_PATHS = {"/api/health", "/api/health/sources"}
 
 
 @app.middleware("http")
@@ -55,7 +58,7 @@ async def _require_api_key(request: Request, call_next):
         _API_KEY
         and request.method != "OPTIONS"
         and request.url.path.startswith("/api/")
-        and request.url.path != "/api/health"
+        and request.url.path not in _HEALTH_PATHS
     ):
         if request.headers.get("authorization", "") != f"Bearer {_API_KEY}":
             return JSONResponse({"detail": "未授权：缺少或错误的 API Key（VR_API_KEY）"}, status_code=401)
@@ -74,6 +77,35 @@ def _validate(code: str) -> str:
 @app.get("/api/health")
 def health():
     return {"ok": True, "service": "vibe-research-api", "version": "0.1.3"}
+
+
+@app.get("/api/health/sources")
+def health_sources():
+    """数据源与 fallback chain 健康状态（只读内存 registry）。"""
+    try:
+        return registry.to_dict()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"健康状态读取异常：{e}") from e
+
+
+def _meta_from(result: FetchResult) -> dict:
+    meta = {"source": result.source, "stale": result.stale, "chain": result.chain}
+    if result.cached_at:
+        meta["cached_at"] = result.cached_at
+    if result.partial:
+        meta["partial"] = True
+    return meta
+
+
+def _sources_failed(exc: AllSourcesFailed, label: str) -> HTTPException:
+    return HTTPException(
+        503,
+        detail={
+            "detail": f"{label}所有数据源不可用",
+            "chain": exc.endpoint,
+            "attempts": exc.attempts,
+        },
+    )
 
 
 class LLMConfig(BaseModel):
@@ -316,14 +348,15 @@ def indices():
 
 @app.get("/api/quote")
 def quote(codes: str = Query(..., description="逗号分隔的 6 位代码")):
-    """实时行情：现价/涨跌/PE/PB/市值/换手/涨跌停。仅标准库，永远可用。"""
+    """实时行情：现价/涨跌/PE/PB/市值/换手/涨跌停。腾讯主源，失败降级 stale 缓存。"""
     lst = [c.strip() for c in codes.split(",") if c.strip()]
     if not lst or any(not c.isdigit() or len(c) != 6 for c in lst):
         raise HTTPException(400, "codes 必须是逗号分隔的 6 位数字")
     try:
-        return {"data": astock.tencent_quote(lst)}
-    except Exception as e:  # noqa: BLE001 — 边界统一兜底
-        raise HTTPException(502, f"行情源异常：{e}") from e
+        result = astock.fetch_quote(lst)
+        return {"data": result.data, "_meta": _meta_from(result)}
+    except AllSourcesFailed as e:
+        raise _sources_failed(e, "行情") from e
 
 
 import time as _time
@@ -415,9 +448,12 @@ def news(code: str = Query(...), limit: int = Query(20, ge=1, le=50)):
     """个股新闻（东财，需 akshare）。"""
     code = _validate(code)
     try:
-        return {"data": astock.stock_news(code, limit=limit)}
+        result = astock.fetch_news(code, limit=limit)
+        return {"data": result.data, "_meta": _meta_from(result)}
     except astock.DependencyMissing as e:
         raise HTTPException(501, str(e)) from e
+    except AllSourcesFailed as e:
+        raise _sources_failed(e, "新闻") from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"新闻源异常：{e}") from e
 
@@ -451,9 +487,12 @@ def kline(code: str = Query(...), category: int = Query(4), offset: int = Query(
     """K线（需 mootdx）。category 4=日 5=周 6=月 11=60分钟。"""
     code = _validate(code)
     try:
-        return {"data": astock.kline(code, category=category, offset=offset)}
+        result = astock.fetch_kline(code, category=category, offset=offset)
+        return {"data": result.data, "_meta": _meta_from(result)}
     except astock.DependencyMissing as e:
         raise HTTPException(501, str(e)) from e
+    except AllSourcesFailed as e:
+        raise _sources_failed(e, "K线") from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"K线源异常：{e}") from e
 
@@ -483,9 +522,14 @@ def _cached(endpoint: str, code: str, ttl: int, fetch):
     hit = _DC_CACHE.get(key)
     if hit and _time.time() - hit[0] < ttl:
         return hit[1]
-    data = fetch()
-    _DC_CACHE[key] = (_time.time(), data)
-    return data
+    try:
+        data = fetch()
+        registry.mark_ok("eastmoney")
+        _DC_CACHE[key] = (_time.time(), data)
+        return data
+    except Exception as e:  # noqa: BLE001
+        registry.mark_fail("eastmoney", str(e))
+        raise
 
 
 @app.get("/api/margin")

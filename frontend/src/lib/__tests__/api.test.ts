@@ -89,6 +89,40 @@ describe("api request errors", () => {
     );
   });
 
+  it("throws 503 with friendly message for AllSourcesFailed", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({
+        detail: {
+          detail: "行情所有数据源不可用",
+          chain: "quote",
+          attempts: [{ source: "tencent", error: "timeout" }],
+        },
+      }),
+    }));
+    await expect(api.quote("600519")).rejects.toMatchObject({
+      message: "行情所有数据源不可用",
+      status: 503,
+    });
+  });
+
+  it("healthSources returns full payload without data wrapper", async () => {
+    const payload = {
+      sources: { tencent: { status: "ok", last_ok: "2026-07-12T10:00:00+08:00", last_fail: null, last_error: null } },
+      chains: { quote: "ok", kline: "down", news: "down" },
+      updated_at: "2026-07-12T10:00:01+08:00",
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => payload,
+    }));
+    const result = await api.healthSources();
+    expect(result.chains.quote).toBe("ok");
+    expect(result.sources.tencent.status).toBe("ok");
+  });
+
   it("throws ApiError with detail from JSON body", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,
@@ -155,6 +189,7 @@ describe("api client methods", () => {
     await api.valuation("600519");
     await api.percentile("600519");
     await api.quote("600519");
+    await api.healthSources();
     expect(fetchMock).toHaveBeenCalledWith("/api/indices", expect.any(Object));
     expect(fetchMock).toHaveBeenCalledWith("/api/market/overview", expect.any(Object));
     expect(fetchMock).toHaveBeenCalledWith("/api/market/emotion", expect.any(Object));

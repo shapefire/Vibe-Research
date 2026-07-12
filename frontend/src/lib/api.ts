@@ -75,9 +75,29 @@ async function request<T>(path: string, method: "GET" | "POST" | "DELETE" = "GET
     if (resp.status === 401) {
       throw new ApiError("后端开启了访问鉴权（VR_API_KEY）：请在「接入 AI」页底部填写后端访问密钥", 401);
     }
+    if (resp.status === 503) {
+      const detail = payload?.detail;
+      const msg = typeof detail === "object" ? detail?.detail : detail;
+      throw new ApiError(msg || "数据源暂时不可用，请稍后重试", 503);
+    }
     throw new ApiError(payload?.detail || `HTTP ${resp.status}`, resp.status);
   }
   return (payload?.data ?? payload) as T;
+}
+
+/** 返回完整 JSON 外壳（含 _meta），用于 health 等端点。 */
+async function requestFull<T>(path: string): Promise<T> {
+  let resp: Response;
+  try {
+    resp = await fetch(`/api${path}`, { headers: authHeaders() });
+  } catch {
+    throw new ApiError("连接不到后端，请先启动 backend（uvicorn app:app --port 8900）", 0);
+  }
+  const payload = await resp.json();
+  if (!resp.ok) {
+    throw new ApiError(payload?.detail || `HTTP ${resp.status}`, resp.status);
+  }
+  return payload as T;
 }
 
 const get = <T>(path: string) => request<T>(path, "GET");
@@ -233,8 +253,30 @@ export interface GlobalStock {
   quote: GlobalQuote; metrics: GlobalMetrics | null;
 }
 
+export interface FetchMeta {
+  source: string;
+  stale: boolean;
+  chain?: string;
+  cached_at?: string;
+  partial?: boolean;
+}
+
+export interface HealthSource {
+  status: "ok" | "degraded" | "down" | "missing" | "idle";
+  last_ok: string | null;
+  last_fail: string | null;
+  last_error: string | null;
+}
+
+export interface HealthSources {
+  sources: Record<string, HealthSource>;
+  chains: Record<string, "ok" | "degraded" | "down">;
+  updated_at: string;
+}
+
 export const api = {
   health: () => get<{ ok: boolean }>("/health"),
+  healthSources: () => requestFull<HealthSources>("/health/sources"),
   indices: () => get<IndexQuote[]>("/indices"),
   marketOverview: () => get<MarketOverview>("/market/overview"),
   emotion: () => get<ShortTermEmotion>("/market/emotion"),

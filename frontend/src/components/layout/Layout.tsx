@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { SourceStatusBanner } from "@/components/ui/SourceStatusBanner";
 
 const APP_VERSION = "v0.1.3";
 const REPO_URL = "https://github.com/simonlin1212/Vibe-Research";
@@ -161,6 +162,7 @@ export function Layout() {
       {/* Main */}
       <main className="flex-1 overflow-auto">
         <div className="mx-auto max-w-6xl px-6 py-6">
+          <SourceStatusBanner />
           <Outlet />
         </div>
       </main>

@@ -3,6 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app as app_module
+import astock
 
 client = TestClient(app_module.app)
 
@@ -11,6 +12,57 @@ def test_health():
     r = client.get("/api/health")
     assert r.status_code == 200
     assert r.json()["ok"] is True
+
+
+def test_health_sources_endpoint():
+    r = client.get("/api/health/sources")
+    assert r.status_code == 200
+    body = r.json()
+    assert "sources" in body
+    assert "chains" in body
+    assert "quote" in body["chains"]
+    assert "kline" in body["chains"]
+    assert "news" in body["chains"]
+
+
+def test_quote_all_fail_returns_503(monkeypatch):
+    from data_fetcher.base import AllSourcesFailed
+
+    def _fail(codes):
+        raise AllSourcesFailed("quote", [{"source": "tencent", "error": "down"}])
+
+    monkeypatch.setattr(astock, "fetch_quote", _fail)
+    r = client.get("/api/quote?codes=600519")
+    assert r.status_code == 503
+    body = r.json()
+    assert "attempts" in body["detail"]
+
+
+def test_quote_stale_meta(monkeypatch):
+    from data_fetcher.base import FetchResult
+
+    monkeypatch.setattr(
+        astock,
+        "fetch_quote",
+        lambda codes: FetchResult(
+            data={"600519": {"name": "茅台", "price": 1.0}},
+            source="stale_cache",
+            chain="quote",
+            stale=True,
+            cached_at="2026-07-12T10:00:00+08:00",
+        ),
+    )
+    r = client.get("/api/quote?codes=600519")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["_meta"]["stale"] is True
+    assert body["_meta"]["source"] == "stale_cache"
+
+
+def test_health_sources_no_auth_when_api_key_set(monkeypatch):
+    monkeypatch.setattr(app_module, "_API_KEY", "secret-key")
+    r = client.get("/api/health/sources")
+    assert r.status_code == 200
 
 
 @pytest.mark.parametrize("path", [
