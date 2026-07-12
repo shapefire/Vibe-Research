@@ -1,8 +1,16 @@
+# 构建需启用 BuildKit（支持 cache mount）：
+#   DOCKER_BUILDKIT=1 docker compose -f docker/docker-compose.yml build
 services:
   vibe-research:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        NODE_IMAGE: docker.m.daocloud.io/node:20-alpine
+        PYTHON_IMAGE: docker.m.daocloud.io/python:3.11-slim-bookworm
+        NPM_REGISTRY: https://registry.npmmirror.com
+        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+        PIP_TRUSTED_HOST: pypi.tuna.tsinghua.edu.cn
     ports:
       - "8900:8900"
     volumes:
