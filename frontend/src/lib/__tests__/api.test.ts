@@ -123,6 +123,21 @@ describe("api request errors", () => {
     expect(result.sources.tencent.status).toBe("ok");
   });
 
+  it("quoteWithMeta returns data and stale meta", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: { "600519": { name: "茅台", price: 1, last_close: 1, change_pct: 0, pe_ttm: 1, pb: 1, mcap_yi: 1, turnover_pct: 0, limit_up: 0, limit_down: 0 } },
+        _meta: { source: "stale_cache", stale: true, chain: "quote", partial: true },
+      }),
+    }));
+    const result = await api.quoteWithMeta("600519,000001");
+    expect(result.data["600519"].name).toBe("茅台");
+    expect(result.meta?.stale).toBe(true);
+    expect(result.meta?.partial).toBe(true);
+  });
+
   it("throws ApiError with detail from JSON body", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,

@@ -12,9 +12,10 @@ import {
   api, ApiError, type Valuation, type Report, type NewsItem, type ValPercentile, type ValMetric,
   type Financials, type Announcement, type MarginRow, type BlockTradeRow, type HolderRow,
   type DividendRow, type FundFlowRow, type DragonTiger, type Lockup, type Blocks, type HotConcept, type QaRow,
-  type GlobalStock,
+  type GlobalStock, type FetchMeta,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { StaleBadge } from "@/components/ui/StaleBadge";
 
 // 金额格式化（后端资金单位：元 / 万元）
 const yi = (v: number) => `${(v / 1e8).toFixed(2)} 亿`;
@@ -100,6 +101,7 @@ export function StockData() {
   const [hotCon, setHotCon] = useState<HotConcept[]>([]);
   const [qa, setQa] = useState<QaRow[]>([]);
   const [gstock, setGStock] = useState<GlobalStock | null>(null);  // 美股 / 港股
+  const [quoteMeta, setQuoteMeta] = useState<FetchMeta | null>(null);
   const runIdRef = useRef(0);
 
   const run = async () => {
@@ -108,7 +110,7 @@ export function StockData() {
     const rid = ++runIdRef.current;
     setLoading(true); setErr(null); setDepNote(null); setVal(null); setReports([]); setNews([]); setPctl(null); setFin(null); setAnns([]);
     setMargin([]); setBlockT([]); setHolders([]); setDividend([]); setFundFlow([]); setDt(null); setLockup(null); setBlocks(null); setHotCon([]); setQa([]);
-    setGStock(null);
+    setGStock(null); setQuoteMeta(null);
 
     // 6 位纯数字 = A 股；否则（字母 / 港股短代码）走美股 / 港股（global-stock-data）
     if (!/^\d{6}$/.test(c)) {
@@ -135,6 +137,7 @@ export function StockData() {
     api.blocks(c).then(ok(setBlocks)).catch(() => {});
     api.hotConcepts(c).then(ok(setHotCon)).catch(() => {});
     api.investorQa(c).then(ok(setQa)).catch(() => {});
+    api.quoteWithMeta(c).then((r) => { if (rid === runIdRef.current) setQuoteMeta(r.meta ?? null); }).catch(() => {});
     try {
       // 行情+估值+研报+历史分位+财务+公告（新闻单独降级）
       const [v, r, p, f, a] = await Promise.all([
@@ -301,6 +304,7 @@ export function StockData() {
             <div className="mb-4 flex items-baseline gap-2">
               <h2 className="text-xl font-bold">{val.name}</h2>
               <span className="font-mono text-sm text-muted-foreground">{val.code}</span>
+              {quoteMeta?.stale && <StaleBadge partial={quoteMeta.partial} />}
               {val.analyst_count > 0 && (
                 <span className="ml-auto text-xs text-muted-foreground">机构覆盖 {val.analyst_count} 家</span>
               )}

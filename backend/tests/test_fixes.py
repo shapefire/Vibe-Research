@@ -32,7 +32,16 @@ def test_api_key_auth(monkeypatch):
 def tmp_pf(tmp_path, monkeypatch):
     monkeypatch.setattr(pf, "CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(pf, "PF_FILE", str(tmp_path / "portfolio.json"))
-    monkeypatch.setattr(astock, "tencent_quote", lambda codes: {c: {"name": f"股{c}", "price": 10.0} for c in codes})
+
+    def _mock_quote(codes):
+        from data_fetcher.base import FetchResult
+        return FetchResult(
+            data={c: {"name": f"股{c}", "price": 10.0} for c in codes},
+            source="tencent",
+            chain="quote",
+        )
+
+    monkeypatch.setattr(astock, "fetch_quote", _mock_quote)
     return tmp_path
 
 

@@ -92,6 +92,16 @@ def remove_holding(code: str) -> dict:
     return get_portfolio()
 
 
+def _quote_map(codes: list[str]) -> dict[str, dict]:
+    """批量行情，走 fallback chain（腾讯 → stale 缓存）。"""
+    if not codes:
+        return {}
+    try:
+        return astock.fetch_quote(codes).data
+    except Exception:
+        return {}
+
+
 def close_position(code: str, date: str, price: float, shares: float, cost: float) -> dict:
     """记一笔已清仓：算已实现盈亏，存入 closed 列表。"""
     pnl = (price - cost) * shares
@@ -99,7 +109,7 @@ def close_position(code: str, date: str, price: float, shares: float, cost: floa
         d = _load()
         d.setdefault("closed", [])
         try:
-            name = astock.tencent_quote([code]).get(code, {}).get("name", code)
+            name = _quote_map([code]).get(code, {}).get("name", code)
         except Exception:
             name = code
         d["closed"].append({
@@ -129,7 +139,7 @@ def get_portfolio() -> dict:
     rows, tmv, tcost = [], 0.0, 0.0
     if hs:
         try:
-            quotes = astock.tencent_quote([h["code"] for h in hs])
+            quotes = _quote_map([h["code"] for h in hs])
         except Exception:
             quotes = {}
         for h in hs:

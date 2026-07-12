@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-
+from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -517,59 +517,65 @@ def finance(code: str = Query(...)):
 _DC_CACHE: dict = {}  # key=(endpoint, code) -> (ts, data)
 
 
-def _cached(endpoint: str, code: str, ttl: int, fetch):
-    key = (endpoint, code)
+@dataclass(frozen=True)
+class _CachedResult:
+    data: object
+    stale: bool = False
+
+
+def _cached(key: tuple, ttl: int, fetch) -> _CachedResult:
     hit = _DC_CACHE.get(key)
     if hit and _time.time() - hit[0] < ttl:
-        return hit[1]
+        return _CachedResult(data=hit[1], stale=False)
     try:
         data = fetch()
         registry.mark_ok("eastmoney")
         _DC_CACHE[key] = (_time.time(), data)
-        return data
+        return _CachedResult(data=data, stale=False)
     except Exception as e:  # noqa: BLE001
         registry.mark_fail("eastmoney", str(e))
+        if hit:
+            return _CachedResult(data=hit[1], stale=True)
         raise
+
+
+def _eastmoney_response(key: tuple, ttl: int, fetch, err_label: str) -> dict:
+    try:
+        result = _cached(key, ttl, fetch)
+        body: dict = {"data": result.data}
+        if result.stale:
+            body["_meta"] = {"source": "eastmoney", "stale": True, "chain": "eastmoney"}
+        return body
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"{err_label}异常：{e}") from e
 
 
 @app.get("/api/margin")
 def margin(code: str = Query(...)):
     """融资融券明细（东财，日级）。缓存 30 分钟。"""
     code = _validate(code)
-    try:
-        return {"data": _cached("margin", code, 1800, lambda: astock.margin_trading(code))}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"融资融券异常：{e}") from e
+    return _eastmoney_response(("margin", code), 1800, lambda: astock.margin_trading(code), "融资融券")
 
 
 @app.get("/api/block-trade")
 def block_trade(code: str = Query(...)):
     """大宗交易（东财）。缓存 30 分钟。"""
     code = _validate(code)
-    try:
-        return {"data": _cached("block", code, 1800, lambda: astock.block_trade(code))}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"大宗交易异常：{e}") from e
+    return _eastmoney_response(("block", code), 1800, lambda: astock.block_trade(code), "大宗交易")
 
 
 @app.get("/api/holders")
 def holders(code: str = Query(...)):
     """股东户数变化（东财，季度级）。缓存 30 分钟。"""
     code = _validate(code)
-    try:
-        return {"data": _cached("holders", code, 1800, lambda: astock.holder_num_change(code))}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"股东户数异常：{e}") from e
+    return _eastmoney_response(("holders", code), 1800, lambda: astock.holder_num_change(code), "股东户数")
 
 
 @app.get("/api/dividend")
 def dividend(code: str = Query(...)):
     """分红送转历史（东财）。缓存 30 分钟。"""
     code = _validate(code)
-    try:
-        return {"data": _cached("dividend", code, 1800, lambda: astock.dividend_history(code))}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"分红送转异常：{e}") from e
+    return _eastmoney_response(("dividend", code), 1800, lambda: astock.dividend_history(code), "分红送转")
 
 
 @app.get("/api/fund-flow")
@@ -577,75 +583,48 @@ def fund_flow(code: str = Query(...)):
     """个股资金流（东财 push2his，120 日主力净流入）。缓存 15 分钟。
     注：push2his 对部分大陆住宅 IP 有间歇风控，可能返回空（非代码问题）。"""
     code = _validate(code)
-    try:
-        return {"data": _cached("fundflow", code, 900, lambda: astock.stock_fund_flow_120d(code))}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"资金流异常：{e}") from e
+    return _eastmoney_response(("fundflow", code), 900, lambda: astock.stock_fund_flow_120d(code), "资金流")
 
 
 @app.get("/api/dragon-tiger")
 def dragon_tiger(code: str = Query(...)):
     """龙虎榜：该股近期上榜记录 + 买卖席位 + 机构净买（东财）。缓存 30 分钟。"""
     code = _validate(code)
-    try:
-        return {"data": _cached("dt", code, 1800, lambda: astock.dragon_tiger_board(code))}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"龙虎榜异常：{e}") from e
+    return _eastmoney_response(("dt", code), 1800, lambda: astock.dragon_tiger_board(code), "龙虎榜")
 
 
 @app.get("/api/lockup")
 def lockup(code: str = Query(...)):
     """限售解禁日历：历史解禁 + 未来 90 天待解禁（东财）。缓存 30 分钟。"""
     code = _validate(code)
-    try:
-        return {"data": _cached("lockup", code, 1800, lambda: astock.lockup_expiry(code))}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"解禁日历异常：{e}") from e
+    return _eastmoney_response(("lockup", code), 1800, lambda: astock.lockup_expiry(code), "解禁日历")
 
 
 @app.get("/api/blocks")
 def blocks(code: str = Query(...)):
     """个股所属板块/概念归属（东财 slist）。缓存 30 分钟。"""
     code = _validate(code)
-    try:
-        return {"data": _cached("blocks", code, 1800, lambda: astock.concept_blocks(code))}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"板块归属异常：{e}") from e
+    return _eastmoney_response(("blocks", code), 1800, lambda: astock.concept_blocks(code), "板块归属")
 
 
 @app.get("/api/hot-concepts")
 def hot_concepts(code: str = Query(...)):
     """个股当下被市场归到哪些概念在炒（东财热门概念命中）。缓存 15 分钟。"""
     code = _validate(code)
-    try:
-        return {"data": _cached("hotcon", code, 900, lambda: astock.hot_concepts(code))}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"热门概念异常：{e}") from e
+    return _eastmoney_response(("hotcon", code), 900, lambda: astock.hot_concepts(code), "热门概念")
 
 
 @app.get("/api/investor-qa")
 def investor_qa(code: str = Query(...)):
     """互动易问答（巨潮）：投资者提问 + 公司回复。缓存 15 分钟。"""
     code = _validate(code)
-    try:
-        return {"data": _cached("irm", code, 900, lambda: astock.investor_qa(code))}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"互动易异常：{e}") from e
+    return _eastmoney_response(("irm", code), 900, lambda: astock.investor_qa(code), "互动易")
 
 
 @app.get("/api/industry")
 def industry(top: int = Query(20, ge=5, le=50)):
     """全行业涨跌幅排名（东财行业板块，板块级、零个股名单）。缓存 5 分钟。"""
-    key = ("industry", str(top))
-    hit = _DC_CACHE.get(key)
-    if hit and _time.time() - hit[0] < 300:
-        return {"data": hit[1]}
-    try:
-        data = astock.industry_comparison(top_n=top)
-        _DC_CACHE[key] = (_time.time(), data)
-        return {"data": data}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"行业排名异常：{e}") from e
+    return _eastmoney_response(("industry", str(top)), 300, lambda: astock.industry_comparison(top_n=top), "行业排名")
 
 
 # 生产模式：Docker 或 npm run build 后，同端口托管前端 dist（开发仍走 Vite :5899 代理）。

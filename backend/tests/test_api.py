@@ -65,6 +65,29 @@ def test_health_sources_no_auth_when_api_key_set(monkeypatch):
     assert r.status_code == 200
 
 
+def test_kline_dependency_missing_501(monkeypatch):
+    def _missing(code, **kw):
+        raise astock.DependencyMissing("mootdx 未安装：pip install mootdx")
+
+    monkeypatch.setattr(astock, "fetch_kline", _missing)
+    r = client.get("/api/kline?code=600519")
+    assert r.status_code == 501
+    assert "mootdx" in r.json()["detail"]
+
+
+def test_eastmoney_cached_stale_fallback(monkeypatch):
+    import time as time_mod
+
+    app_module._DC_CACHE[("margin", "600519")] = (time_mod.time() - 9999, [{"date": "2026-01-01", "rzye": 1.0}])
+    monkeypatch.setattr(astock, "margin_trading", lambda code: (_ for _ in ()).throw(RuntimeError("403 rate limit")))
+    r = client.get("/api/margin?code=600519")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["_meta"]["stale"] is True
+    assert body["_meta"]["source"] == "eastmoney"
+    assert len(body["data"]) == 1
+
+
 @pytest.mark.parametrize("path", [
     "/api/quote?codes=abc",
     "/api/valuation?code=12",

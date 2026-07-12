@@ -85,6 +85,42 @@ async function request<T>(path: string, method: "GET" | "POST" | "DELETE" = "GET
   return (payload?.data ?? payload) as T;
 }
 
+export interface ApiResult<T> {
+  data: T;
+  meta?: FetchMeta;
+}
+
+/** GET 请求，返回 data + 可选 _meta（quote / 东财缓存端点等）。 */
+async function requestWithMeta<T>(path: string): Promise<ApiResult<T>> {
+  let resp: Response;
+  try {
+    resp = await fetch(`/api${path}`, { headers: authHeaders() });
+  } catch {
+    throw new ApiError("连接不到后端，请先启动 backend（uvicorn app:app --port 8900）", 0);
+  }
+  let payload: any = null;
+  try {
+    payload = await resp.json();
+  } catch {
+    /* 非 JSON 响应 */
+  }
+  if (!resp.ok) {
+    if (resp.status === 401) {
+      throw new ApiError("后端开启了访问鉴权（VR_API_KEY）：请在「接入 AI」页底部填写后端访问密钥", 401);
+    }
+    if (resp.status === 503) {
+      const detail = payload?.detail;
+      const msg = typeof detail === "object" ? detail?.detail : detail;
+      throw new ApiError(msg || "数据源暂时不可用，请稍后重试", 503);
+    }
+    throw new ApiError(payload?.detail || `HTTP ${resp.status}`, resp.status);
+  }
+  return {
+    data: (payload?.data ?? payload) as T,
+    meta: payload?._meta as FetchMeta | undefined,
+  };
+}
+
 /** 返回完整 JSON 外壳（含 _meta），用于 health 等端点。 */
 async function requestFull<T>(path: string): Promise<T> {
   let resp: Response;
@@ -297,6 +333,7 @@ export const api = {
   financials: (code: string) => get<Financials>(`/financials?code=${code}`),
   announcements: (code: string) => get<Announcement[]>(`/announcements?code=${code}`),
   quote: (codes: string) => get<Record<string, Quote>>(`/quote?codes=${codes}`),
+  quoteWithMeta: (codes: string) => requestWithMeta<Record<string, Quote>>(`/quote?codes=${codes}`),
   reports: (code: string) => get<Report[]>(`/reports?code=${code}`),
   news: (code: string) => get<NewsItem[]>(`/news?code=${code}`),
   margin: (code: string) => get<MarginRow[]>(`/margin?code=${code}`),

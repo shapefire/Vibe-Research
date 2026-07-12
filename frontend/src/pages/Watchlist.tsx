@@ -4,9 +4,10 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Disclaimer } from "@/components/ui/Disclaimer";
 import { AskAiButton } from "@/components/ui/AskAiButton";
-import { api, type Quote } from "@/lib/api";
+import { api, type Quote, type FetchMeta } from "@/lib/api";
 import { loadWatch, saveWatch, addCodes } from "@/lib/watchlist";
 import { cn } from "@/lib/utils";
+import { StaleBadge } from "@/components/ui/StaleBadge";
 
 // A 股红涨绿跌（与整个看板一致）。
 const color = (v: number | undefined) =>
@@ -16,14 +17,18 @@ const pct = (v: number | undefined) => (v == null ? "—" : `${v > 0 ? "+" : ""}
 export function Watchlist() {
   const [codes, setCodes] = useState<string[]>(loadWatch);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
+  const [quoteMeta, setQuoteMeta] = useState<FetchMeta | null>(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
 
   const refresh = (cs: string[]) => {
-    if (!cs.length) { setQuotes({}); return; }
+    if (!cs.length) { setQuotes({}); setQuoteMeta(null); return; }
     setLoading(true);
-    api.quote(cs.join(",")).then(setQuotes).catch(() => {}).finally(() => setLoading(false));
+    api.quoteWithMeta(cs.join(","))
+      .then(({ data, meta }) => { setQuotes(data); setQuoteMeta(meta ?? null); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   };
   useEffect(() => { refresh(loadWatch()); }, []);
 
@@ -104,6 +109,7 @@ export function Watchlist() {
           <h3 className="flex items-center gap-1.5 font-semibold">
             <Star className="h-4 w-4 text-primary" /> 自选总览
             <span className="text-xs font-normal text-muted-foreground">（{codes.length}）</span>
+            {quoteMeta?.stale && <StaleBadge partial={quoteMeta.partial} />}
           </h3>
           <button
             onClick={() => refresh(codes)}
@@ -135,7 +141,10 @@ export function Watchlist() {
                   const q = quotes[c];
                   return (
                     <tr key={c} className="border-b border-border/30">
-                      <td className="px-2 py-2.5 font-medium">{q?.name || "—"}</td>
+                      <td className="px-2 py-2.5 font-medium">
+                        {q?.name || "—"}
+                        {quoteMeta?.stale && !q && <StaleBadge partial />}
+                      </td>
                       <td className="px-2 py-2.5 font-mono text-xs text-muted-foreground">{c}</td>
                       <td className={cn("px-2 py-2.5 font-mono", color(q?.change_pct))}>{q ? q.price : "—"}</td>
                       <td className={cn("px-2 py-2.5 font-mono", color(q?.change_pct))}>{q ? pct(q.change_pct) : "—"}</td>
