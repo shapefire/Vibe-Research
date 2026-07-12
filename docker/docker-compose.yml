@@ -15,9 +15,12 @@ services:
       - "8900:8900"
     volumes:
       - vr-data:/data
+    env_file:
+      - path: .env
+        required: false
     environment:
       - VR_DATA_DIR=/data
-      - VR_ALLOW_ORIGINS=*
+      - VR_ALLOW_ORIGINS=${VR_ALLOW_ORIGINS:-*}
     restart: unless-stopped
 
 volumes:
