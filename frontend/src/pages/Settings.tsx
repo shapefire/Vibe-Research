@@ -2,6 +2,7 @@ import { useState } from "react";
 import { KeyRound, Sparkles, ShieldCheck, Check, Trash2, Terminal } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { GlassCard } from "@/components/ui/GlassCard";
+import { SourceHealthPanel } from "@/components/ui/SourceHealthPanel";
 import { toast } from "sonner";
 import { loadLlm, saveLlm, clearLlm } from "@/lib/llm";
 import { loadAccessKey, saveAccessKey } from "@/lib/api";
@@ -68,7 +69,9 @@ export function Settings() {
 
   return (
     <div>
-      <PageHeader title="接入 AI" subtitle="配置一次，全站的「问 AI」「复盘」都能用你自己的模型" />
+      <PageHeader title="接入 AI" subtitle="查看数据源状态，并配置全站「问 AI」「复盘」使用的模型" />
+
+      <SourceHealthPanel />
 
       <div className="mb-4 flex items-start gap-2 rounded-lg border border-success/25 bg-success/5 p-3 text-xs text-muted-foreground">
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" />

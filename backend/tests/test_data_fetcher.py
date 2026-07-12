@@ -67,16 +67,31 @@ def test_chain_all_failed():
     assert len(exc.value.attempts) == 2
 
 
-def test_chain_dependency_missing_not_continue(monkeypatch):
-    def missing():
+def test_chain_dependency_missing_continues(monkeypatch):
+    def missing(*_args, **_kwargs):
         raise astock.DependencyMissing("mootdx 未安装")
 
-    def second():
-        return []
+    def second(*_args, **_kwargs):
+        return [{"datetime": "2026-01-01"}]
 
-    chain = FetcherChain("kline", [("mootdx", missing), ("skip", second)])
-    with pytest.raises(astock.DependencyMissing):
-        chain.fetch()
+    chain = FetcherChain("kline", [("mootdx", missing), ("eastmoney", second)])
+    result = chain.fetch("600519")
+    assert result.source == "eastmoney"
+    d = registry.to_dict()
+    assert d["sources"]["mootdx"]["status"] == "missing"
+
+
+def test_chain_all_providers_missing(monkeypatch):
+    def missing_a(*_args, **_kwargs):
+        raise astock.DependencyMissing("akshare 未安装")
+
+    def missing_b(*_args, **_kwargs):
+        raise DataSourceError("eastmoney", "down")
+
+    chain = FetcherChain("news", [("akshare", missing_a), ("eastmoney", missing_b)])
+    with pytest.raises(AllSourcesFailed) as exc:
+        chain.fetch("600519")
+    assert len(exc.value.attempts) == 2
 
 
 def test_quote_chain_tencent_writes_cache(monkeypatch):
@@ -124,24 +139,54 @@ def test_kline_mootdx_only_success(monkeypatch):
     assert result.source == "mootdx"
 
 
-def test_kline_mootdx_fail_all_sources(monkeypatch):
+def test_kline_all_sources_fail(monkeypatch):
     monkeypatch.setattr(
         astock,
         "_fetch_kline",
         lambda code, **kw: (_ for _ in ()).throw(RuntimeError("connection refused")),
     )
+    monkeypatch.setattr(
+        astock,
+        "_fetch_kline_eastmoney",
+        lambda code, **kw: (_ for _ in ()).throw(DataSourceError("eastmoney", "empty")),
+    )
     with pytest.raises(AllSourcesFailed):
         KLINE_CHAIN.fetch("600519")
 
 
-def test_kline_dependency_missing(monkeypatch):
+def test_kline_mootdx_fail_fallback_eastmoney(monkeypatch):
+    monkeypatch.setattr(
+        astock,
+        "_fetch_kline",
+        lambda code, **kw: (_ for _ in ()).throw(RuntimeError("connection refused")),
+    )
+    monkeypatch.setattr(
+        astock,
+        "_fetch_kline_eastmoney",
+        lambda code, **kw: [{"datetime": "2026-01-01", "open": 1.0}],
+    )
+    monkeypatch.setattr(
+        astock,
+        "_fetch_kline_baidu",
+        lambda code, **kw: (_ for _ in ()).throw(DataSourceError("baidu", "skip")),
+    )
+    result = KLINE_CHAIN.fetch("600519")
+    assert result.source == "eastmoney"
+
+
+def test_kline_dependency_missing_fallback(monkeypatch):
     monkeypatch.setattr(
         astock,
         "_fetch_kline",
         lambda code, **kw: (_ for _ in ()).throw(astock.DependencyMissing("mootdx 未安装")),
     )
-    with pytest.raises(astock.DependencyMissing):
-        KLINE_CHAIN.fetch("600519")
+    monkeypatch.setattr(
+        astock,
+        "_fetch_kline_eastmoney",
+        lambda code, **kw: [{"datetime": "2026-01-01"}],
+    )
+    result = KLINE_CHAIN.fetch("600519")
+    assert result.source == "eastmoney"
 
 
 def test_news_akshare_success(monkeypatch):
@@ -150,13 +195,33 @@ def test_news_akshare_success(monkeypatch):
     assert result.source == "akshare"
 
 
-def test_news_akshare_missing(monkeypatch):
+def test_news_akshare_missing_fallback(monkeypatch):
     monkeypatch.setattr(
         astock,
         "_fetch_news",
         lambda code, limit=20: (_ for _ in ()).throw(astock.DependencyMissing("akshare 未安装")),
     )
-    with pytest.raises(astock.DependencyMissing):
+    monkeypatch.setattr(
+        astock,
+        "_fetch_news_eastmoney",
+        lambda code, limit=20: [{"新闻标题": "东财新闻"}],
+    )
+    result = NEWS_CHAIN.fetch("600519")
+    assert result.source == "eastmoney"
+
+
+def test_news_all_sources_fail(monkeypatch):
+    monkeypatch.setattr(
+        astock,
+        "_fetch_news",
+        lambda code, limit=20: (_ for _ in ()).throw(astock.DependencyMissing("akshare 未安装")),
+    )
+    monkeypatch.setattr(
+        astock,
+        "_fetch_news_eastmoney",
+        lambda code, limit=20: (_ for _ in ()).throw(DataSourceError("eastmoney", "blocked")),
+    )
+    with pytest.raises(AllSourcesFailed):
         NEWS_CHAIN.fetch("600519")
 
 
@@ -187,3 +252,8 @@ def test_chain_status_degraded():
     registry.mark_fail("tencent", "down")
     registry.mark_ok("stale_cache")
     assert registry.chain_status("quote") == "degraded"
+
+
+def test_chain_status_idle():
+    assert registry.chain_status("kline") == "idle"
+    assert registry.chain_status("news") == "idle"

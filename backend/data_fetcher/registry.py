@@ -7,11 +7,11 @@ from datetime import datetime, timedelta, timezone
 
 TZ8 = timezone(timedelta(hours=8))
 
-KNOWN_SOURCES = ("tencent", "stale_cache", "eastmoney", "mootdx", "akshare")
+KNOWN_SOURCES = ("tencent", "stale_cache", "eastmoney", "mootdx", "akshare", "baidu")
 CHAIN_SOURCES: dict[str, list[str]] = {
     "quote": ["tencent", "stale_cache"],
-    "kline": ["mootdx"],
-    "news": ["akshare"],
+    "kline": ["mootdx", "eastmoney", "baidu"],
+    "news": ["akshare", "eastmoney"],
 }
 
 
@@ -70,14 +70,19 @@ class SourceRegistry:
         sources = CHAIN_SOURCES.get(chain, [])
         if not sources:
             return "down"
-        primary = self._state(sources[0])
+        states = [self._state(sid) for sid in sources]
+        primary = states[0]
         if primary.status == "ok":
             return "ok"
-        for source_id in sources[1:]:
-            if self._state(source_id).last_ok:
+        for s in states[1:]:
+            if s.status == "ok" or s.last_ok:
                 return "degraded"
-        if primary.status == "missing":
-            return "down"
+        if all(s.status == "idle" for s in states):
+            return "idle"
+        if primary.status == "idle" and not any(
+            s.last_fail or s.status in ("down", "missing", "ok") for s in states[1:]
+        ):
+            return "idle"
         if primary.last_ok:
             return "degraded"
         return "down"

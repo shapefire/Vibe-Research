@@ -306,7 +306,7 @@ export interface HealthSource {
 
 export interface HealthSources {
   sources: Record<string, HealthSource>;
-  chains: Record<string, "ok" | "degraded" | "down">;
+  chains: Record<string, "ok" | "degraded" | "down" | "idle">;
   updated_at: string;
 }
 
@@ -336,6 +336,8 @@ export const api = {
   quoteWithMeta: (codes: string) => requestWithMeta<Record<string, Quote>>(`/quote?codes=${codes}`),
   reports: (code: string) => get<Report[]>(`/reports?code=${code}`),
   news: (code: string) => get<NewsItem[]>(`/news?code=${code}`),
+  kline: (code: string, category = 4, offset = 60) =>
+    get<Record<string, unknown>[]>(`/kline?code=${code}&category=${category}&offset=${offset}`),
   margin: (code: string) => get<MarginRow[]>(`/margin?code=${code}`),
   blockTrade: (code: string) => get<BlockTradeRow[]>(`/block-trade?code=${code}`),
   holders: (code: string) => get<HolderRow[]>(`/holders?code=${code}`),

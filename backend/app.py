@@ -83,9 +83,29 @@ def health():
 def health_sources():
     """数据源与 fallback chain 健康状态（只读内存 registry）。"""
     try:
+        _probe_idle_sources()
         return registry.to_dict()
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"健康状态读取异常：{e}") from e
+
+
+_PROBE_CODE = "600519"
+
+
+def _probe_idle_sources() -> None:
+    """惰性探测尚未调用的 kline/news 链路，刷新 registry 真实状态。"""
+    snap = registry.to_dict()
+    sources = snap.get("sources", {})
+    if sources.get("mootdx", {}).get("status") == "idle":
+        try:
+            astock.fetch_kline(_PROBE_CODE, category=4, offset=5)
+        except Exception:  # noqa: BLE001
+            pass
+    if sources.get("akshare", {}).get("status") == "idle":
+        try:
+            astock.fetch_news(_PROBE_CODE, limit=3)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _meta_from(result: FetchResult) -> dict:

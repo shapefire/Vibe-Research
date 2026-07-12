@@ -11,10 +11,12 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import random
 import re
+import socket
 import time
 import urllib.request
 from datetime import datetime, timedelta
@@ -212,6 +214,46 @@ def _fetch_news(code: str, limit: int = 20) -> list[dict]:
     return df.head(limit).to_dict("records") if df is not None and not df.empty else []
 
 
+def _fetch_news_eastmoney(code: str, limit: int = 20) -> list[dict]:
+    """个股新闻（东财 search-api-web JSONP，无需 akshare）。"""
+    cb = "jQuery_news"
+    url = "https://search-api-web.eastmoney.com/search/jsonp"
+    inner_params = json.dumps({
+        "uid": "",
+        "keyword": code,
+        "type": ["cmsArticleWebOld"],
+        "client": "web",
+        "clientType": "web",
+        "clientVersion": "curr",
+        "param": {
+            "cmsArticleWebOld": {
+                "searchScope": "default",
+                "sort": "default",
+                "pageIndex": 1,
+                "pageSize": limit,
+                "preTag": "",
+                "postTag": "",
+            },
+        },
+    }, separators=(",", ":"))
+    params = {"cb": cb, "param": inner_params}
+    headers = {"User-Agent": UA, "Referer": "https://so.eastmoney.com/"}
+    r = em_get(url, params=params, headers=headers, timeout=15)
+    text = r.text
+    json_str = text[text.index("(") + 1 : text.rindex(")")]
+    d = json.loads(json_str)
+    articles = d.get("result", {}).get("cmsArticleWebOld", []) or []
+    rows = []
+    for a in articles:
+        rows.append({
+            "新闻标题": re.sub(r"<[^>]+>", "", a.get("title", "")),
+            "发布时间": a.get("date", ""),
+            "文章来源": a.get("mediaName", ""),
+            "新闻链接": a.get("url", ""),
+        })
+    return rows[:limit]
+
+
 def stock_news(code: str, limit: int = 20) -> list[dict]:
     """向后兼容别名。"""
     return _fetch_news(code, limit=limit)
@@ -262,19 +304,187 @@ def announcements(code: str, limit: int = 15) -> list[dict]:
 # mootdx 惰性封装（K线 / 财务 / F10）
 # ---------------------------------------------------------------------------
 
+# 通达信 HQ 备选（2026-06 实测），显式 server 可规避 0.11.x BESTIP 空串 bug
+_TDX_SERVERS: tuple[tuple[str, int], ...] = (
+    ("119.97.185.59", 7709),
+    ("124.70.133.119", 7709),
+    ("116.205.183.150", 7709),
+    ("123.60.73.44", 7709),
+    ("116.205.163.254", 7709),
+    ("121.36.225.169", 7709),
+    ("123.60.70.228", 7709),
+    ("124.71.9.153", 7709),
+    ("110.41.147.114", 7709),
+    ("124.71.187.122", 7709),
+)
+
+# HTTP API category → mootdx frequency（0.11.x 用 frequency，不是 category）
+_MOOTDX_FREQUENCY = {4: 9, 5: 5, 6: 6, 11: 3}  # 日/周/月/60分钟
+
+
+def _probe_tdx_server(ip: str, port: int, timeout: float = 2.0) -> bool:
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def _mootdx_client():
+    """创建 mootdx 客户端，规避 BESTIP.HQ 空串导致的 unpack 失败。"""
     try:
         from mootdx.quotes import Quotes
-        return Quotes.factory(market="std")
     except ImportError as e:
         raise DependencyMissing("mootdx 未安装：pip install mootdx") from e
+
+    for ip, port in _TDX_SERVERS:
+        if _probe_tdx_server(ip, port):
+            return Quotes.factory(market="std", server=(ip, port))
+    try:
+        return Quotes.factory(market="std", bestip=True)
+    except Exception:
+        pass
+    try:
+        return Quotes.factory(market="std")
+    except Exception as e:
+        raise RuntimeError(
+            "所有 mootdx 服务器均不可达，请检查网络或更新 _TDX_SERVERS。"
+            f"原始错误：{e}"
+        ) from e
 
 
 def _fetch_kline(code: str, category: int = 4, offset: int = 60) -> list[dict]:
     """K线：category 4=日 5=周 6=月 11=60分钟。"""
     client = _mootdx_client()
-    df = client.bars(symbol=code, category=category, offset=offset)
+    frequency = _MOOTDX_FREQUENCY.get(category, 9)
+    df = client.bars(symbol=code, frequency=frequency, offset=offset)
     return df.to_dict("records") if df is not None and not df.empty else []
+
+
+_EASTMONEY_KLT = {4: 101, 5: 102, 6: 103, 11: 60}
+
+
+def _fetch_kline_eastmoney(code: str, category: int = 4, offset: int = 60) -> list[dict]:
+    """K 线（东财 push2his，无需 mootdx）。category 4=日 5=周 6=月 11=60分钟。"""
+    from data_fetcher.base import DataSourceError
+
+    klt = _EASTMONEY_KLT.get(category)
+    if klt is None:
+        raise DataSourceError("eastmoney", f"unsupported category {category}")
+    market_code = 1 if code.startswith("6") else 0
+    secid = f"{market_code}.{code}"
+    params = {
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+        "ut": "7eea3edcaed734bea9cbfc24409ed989",
+        "klt": str(klt),
+        "fqt": "0",
+        "secid": secid,
+        "beg": "0",
+        "end": "20500101",
+        "lmt": str(offset),
+    }
+    headers = {
+        "User-Agent": UA,
+        "Referer": "https://quote.eastmoney.com/",
+        "Origin": "https://quote.eastmoney.com",
+    }
+    try:
+        d = em_get(
+            "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+            params=params,
+            headers=headers,
+            timeout=15,
+        ).json()
+    except Exception as e:  # noqa: BLE001
+        msg = str(e)
+        if "push2his" in msg or "push2." in msg:
+            msg += "（push 域建议直连：关闭系统代理/Clash 对国内站劫持，或调大 VR_EM_MIN_INTERVAL）"
+        raise DataSourceError("eastmoney", msg) from e
+    klines = (d.get("data") or {}).get("klines") or []
+    if not klines:
+        raise DataSourceError("eastmoney", "empty kline response")
+    rows = []
+    for line in klines:
+        p = line.split(",")
+        if len(p) < 7:
+            continue
+        try:
+            rows.append({
+                "datetime": p[0],
+                "open": float(p[1]) if p[1] not in ("", "-") else 0.0,
+                "close": float(p[2]) if p[2] not in ("", "-") else 0.0,
+                "high": float(p[3]) if p[3] not in ("", "-") else 0.0,
+                "low": float(p[4]) if p[4] not in ("", "-") else 0.0,
+                "vol": float(p[5]) if p[5] not in ("", "-") else 0.0,
+                "amount": float(p[6]) if p[6] not in ("", "-") else 0.0,
+            })
+        except ValueError:
+            continue
+    if not rows:
+        raise DataSourceError("eastmoney", "failed to parse kline response")
+    return rows
+
+
+def _fetch_kline_baidu(code: str, category: int = 4, offset: int = 60) -> list[dict]:
+    """日 K 线（百度股市通，仅 category=4）。push2his 被封时的独立备胎。"""
+    from data_fetcher.base import DataSourceError
+
+    if category != 4:
+        raise DataSourceError("baidu", f"baidu only supports daily kline, got category={category}")
+    import requests
+
+    url = "https://finance.pae.baidu.com/selfselect/getstockquotation"
+    params = {
+        "all": "1", "isIndex": "false", "isBk": "false", "isBlock": "false",
+        "isFutures": "false", "isStock": "true", "newFormat": "1",
+        "group": "quotation_kline_ab", "finClientType": "pc",
+        "code": code, "start_time": "", "ktype": "1",
+    }
+    headers = {
+        "User-Agent": UA,
+        "Accept": "application/vnd.finance-web.v1+json",
+        "Origin": "https://gushitong.baidu.com",
+        "Referer": "https://gushitong.baidu.com/",
+    }
+    try:
+        d = requests.get(url, params=params, headers=headers, timeout=12).json()
+    except Exception as e:  # noqa: BLE001
+        raise DataSourceError("baidu", str(e)) from e
+    if str(d.get("ResultCode", "")) not in ("0", ""):
+        raise DataSourceError("baidu", f"ResultCode={d.get('ResultCode')}")
+    result = d.get("Result") or {}
+    if isinstance(result, list):
+        raise DataSourceError("baidu", "empty kline response")
+    md = result.get("newMarketData") or {}
+    keys = md.get("keys") or []
+    raw_rows = [r for r in (md.get("marketData") or "").split(";") if r.strip()]
+    if not keys or not raw_rows:
+        raise DataSourceError("baidu", "empty kline response")
+    idx = {k: i for i, k in enumerate(keys)}
+
+    def _cell(row_parts: list[str], key: str) -> str:
+        i = idx.get(key)
+        return row_parts[i] if i is not None and i < len(row_parts) else ""
+
+    rows: list[dict] = []
+    for line in raw_rows[-offset:]:
+        parts = line.split(",")
+        try:
+            rows.append({
+                "datetime": _cell(parts, "time"),
+                "open": float(_cell(parts, "open") or 0),
+                "close": float(_cell(parts, "close") or 0),
+                "high": float(_cell(parts, "high") or 0),
+                "low": float(_cell(parts, "low") or 0),
+                "vol": float(_cell(parts, "volume") or 0),
+                "amount": float(_cell(parts, "amount") or 0),
+            })
+        except ValueError:
+            continue
+    if not rows:
+        raise DataSourceError("baidu", "failed to parse kline response")
+    return rows
 
 
 def kline(code: str, category: int = 4, offset: int = 60) -> list[dict]:
@@ -439,22 +649,45 @@ def full_valuation(code: str) -> dict:
 # ===========================================================================
 
 _DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-_EM_MIN_INTERVAL = 1.0          # 两次东财请求最小间隔（秒），内置防封节流
+_EM_MIN_INTERVAL_DEFAULT = 1.0   # 两次东财请求最小间隔（秒），可用 VR_EM_MIN_INTERVAL 调大
 _em_last_call = [0.0]
 _EM_SESSIONS: dict = {}         # {direct(bool): requests.Session}
+_EM_PUSH_HOST_PREFIXES = ("push2.", "push2his.", "push2ex.", "push2delay.")
+# 按域名记录连接模式，避免 push 域失败把全局锁到 proxy（科学上网代理常掐国内 push 站）
+_em_host_mode: dict[str, str] = {}
 
 # 数据层连接模式：国内财经站（东财/腾讯/新浪）本应「直连」——很多用户开着 Clash/V2Ray
 # 科学上网，系统代理会把东财这类国内站路由挂掉（典型：push2.eastmoney.com 的 CONNECT 被掐）。
-# 默认 auto：先试直连、失败再降级走系统代理；探测一次后固定，避免每次都重试。
+# 默认 auto：先试直连、失败再降级走系统代理；push2/push2his 子域**永不走代理**。
 # 只有少数「必须靠代理才能出网」的环境需要 VR_DATA_PROXY=1 强制走代理。
-# 注意：这只影响数据层；AI 层（可能要调国外模型）仍走各自的系统代理，不受影响。
 _em_mode = ["proxy" if os.environ.get("VR_DATA_PROXY", "").strip().lower() in ("1", "true", "yes") else "auto"]
+
+
+def _em_min_interval() -> float:
+    raw = os.environ.get("VR_EM_MIN_INTERVAL", "").strip()
+    if not raw:
+        return _EM_MIN_INTERVAL_DEFAULT
+    try:
+        return max(0.5, float(raw))
+    except ValueError:
+        return _EM_MIN_INTERVAL_DEFAULT
+
+
+def _em_hostname(url: str) -> str:
+    from urllib.parse import urlparse
+
+    return (urlparse(url).hostname or "").lower()
+
+
+def _em_is_push_host(url: str) -> bool:
+    host = _em_hostname(url)
+    return any(host.startswith(p) for p in _EM_PUSH_HOST_PREFIXES)
 
 
 def _em_session(direct: bool):
     """东财专用会话。direct=True → `trust_env=False` 忽略 HTTP(S)_PROXY 环境变量、直连。
 
-    直连会话不重试（探测要快，失败即降级）；代理会话保留瞬态错误退避重试。惰性构建、复用。
+    push 域会话：直连 + 轻量连接重试；代理会话保留瞬态错误退避重试。惰性构建、复用。
     """
     if direct in _EM_SESSIONS:
         return _EM_SESSIONS[direct]
@@ -467,9 +700,13 @@ def _em_session(direct: bool):
         from requests.adapters import HTTPAdapter
         from urllib3.util.retry import Retry
 
-        retry = Retry(total=0) if direct else Retry(
-            total=3, connect=3, backoff_factor=0.6,
-            status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["GET"])
+        retry = Retry(
+            total=1 if direct else 3,
+            connect=1 if direct else 3,
+            backoff_factor=0.8,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"],
+        )
         adapter = HTTPAdapter(max_retries=retry)
         s.mount("https://", adapter)
         s.mount("http://", adapter)
@@ -479,27 +716,48 @@ def _em_session(direct: bool):
     return s
 
 
-def em_get(url: str, params: dict | None = None, headers: dict | None = None, timeout: int = 15):
-    """东财统一请求入口：串行限流 + **直连优先、失败降级系统代理**（避免科学上网代理挂掉国内站）。
+def _em_get_push(url: str, params: dict | None, headers: dict | None, timeout: int):
+    """push2/push2his 专用：仅直连 + 间隔重试，不走系统代理（避免 ProxyError）。"""
+    last_err: Exception | None = None
+    for attempt in range(2):
+        if attempt:
+            time.sleep(1.0 + random.uniform(0.2, 0.8))
+        try:
+            return _em_session(True).get(
+                url, params=params, headers=headers, timeout=max(timeout, 12),
+            )
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+    assert last_err is not None
+    raise last_err
 
-    第一次请求探测：先直连（短超时、不重试），成功即固定走直连；失败则降级走系统代理并固定。
-    探测结果整个进程复用，避免每次重试。`VR_DATA_PROXY=1` 可跳过探测、强制走代理。
+
+def em_get(url: str, params: dict | None = None, headers: dict | None = None, timeout: int = 15):
+    """东财统一请求入口：串行限流 + 直连优先（push 域永不代理）。
+
+    `VR_DATA_PROXY=1` 强制全局走代理（非 push 域）；`VR_EM_MIN_INTERVAL` 可调大降频。
     """
-    wait = _EM_MIN_INTERVAL - (time.time() - _em_last_call[0])
+    wait = _em_min_interval() - (time.time() - _em_last_call[0])
     if wait > 0:
         time.sleep(wait + random.uniform(0.1, 0.5))
     try:
-        mode = _em_mode[0]
-        if mode != "auto":
-            return _em_session(mode == "direct").get(url, params=params, headers=headers, timeout=timeout)
-        # auto：先直连，成功固定 direct；直连失败再走系统代理、成功固定 proxy。
+        if _em_is_push_host(url):
+            return _em_get_push(url, params, headers, timeout)
+
+        host = _em_hostname(url)
+        mode = _em_mode[0] if _em_mode[0] != "auto" else _em_host_mode.get(host, "auto")
+        if mode == "direct":
+            return _em_session(True).get(url, params=params, headers=headers, timeout=timeout)
+        if mode == "proxy":
+            return _em_session(False).get(url, params=params, headers=headers, timeout=timeout)
+
         try:
             r = _em_session(True).get(url, params=params, headers=headers, timeout=min(timeout, 8))
-            _em_mode[0] = "direct"
+            _em_host_mode[host] = "direct"
             return r
         except Exception:
             r = _em_session(False).get(url, params=params, headers=headers, timeout=timeout)
-            _em_mode[0] = "proxy"
+            _em_host_mode[host] = "proxy"
             return r
     finally:
         _em_last_call[0] = time.time()

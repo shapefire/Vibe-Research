@@ -54,3 +54,61 @@ def test_parse_gtimg_bad_line_ignored():
     # 字段不足 / 无引号的行应被安全跳过，不抛异常。
     assert astock._parse_gtimg("garbage;no_quotes_here;") == {}
     assert astock._parse_gtimg("") == {}
+
+
+def test_mootdx_client_uses_reachable_server(monkeypatch):
+    calls: list[tuple] = []
+
+    class FakeQuotes:
+        @staticmethod
+        def factory(*, market, server=None, bestip=False):
+            calls.append((market, server, bestip))
+            return f"client-{server}"
+
+    monkeypatch.setattr(astock, "_probe_tdx_server", lambda ip, port, timeout=2.0: ip == "119.97.185.59")
+    import sys
+    fake_mod = type(sys)("mootdx.quotes")
+    fake_mod.Quotes = FakeQuotes
+    monkeypatch.setitem(sys.modules, "mootdx.quotes", fake_mod)
+    monkeypatch.setitem(sys.modules, "mootdx", type(sys)("mootdx"))
+
+    client = astock._mootdx_client()
+    assert client == "client-('119.97.185.59', 7709)"
+    assert calls[0] == ("std", ("119.97.185.59", 7709), False)
+
+
+def test_mootdx_frequency_mapping():
+    assert astock._MOOTDX_FREQUENCY[4] == 9   # 日线
+    assert astock._MOOTDX_FREQUENCY[11] == 3  # 60 分钟（非 mootdx 的 11=年线）
+
+
+def test_em_is_push_host():
+    assert astock._em_is_push_host("https://push2his.eastmoney.com/api/qt/stock/kline/get")
+    assert astock._em_is_push_host("https://push2.eastmoney.com/api/qt/clist/get")
+    assert not astock._em_is_push_host("https://datacenter-web.eastmoney.com/api/data/v1/get")
+
+
+def test_fetch_kline_baidu_parses_rows():
+    payload = {
+        "ResultCode": "0",
+        "Result": {
+            "newMarketData": {
+                "keys": ["time", "open", "close", "high", "low", "volume", "amount"],
+                "marketData": "2026-07-11,10,11,12,9,1000,2000;2026-07-12,11,12,13,10,1100,2100",
+            },
+        },
+    }
+
+    class FakeResp:
+        def json(self):
+            return payload
+
+    import requests as req_mod
+    orig = req_mod.get
+    req_mod.get = lambda *a, **k: FakeResp()  # type: ignore[assignment]
+    try:
+        rows = astock._fetch_kline_baidu("600519", category=4, offset=10)
+    finally:
+        req_mod.get = orig
+    assert len(rows) == 2
+    assert rows[-1]["close"] == 12.0

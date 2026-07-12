@@ -73,6 +73,15 @@ class FetcherChain:
                 registry.mark_fail(source_id, str(e.reason))
                 log.warning("source %s failed: %s", source_id, e.reason)
                 continue
+            except Exception as e:
+                import astock
+
+                if isinstance(e, astock.DependencyMissing):
+                    attempts.append({"source": source_id, "error": str(e)})
+                    registry.mark_missing(source_id, str(e))
+                    log.warning("source %s missing: %s", source_id, e)
+                    continue
+                raise
         raise AllSourcesFailed(self.name, attempts)
 
 
