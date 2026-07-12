@@ -262,7 +262,7 @@ class MigrateIn(BaseModel):
 def notes_list(
     kind: str | None = None,
     q: str | None = None,
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
     return {"data": notes_mod.list_notes(kind=kind, q=q, limit=limit, offset=offset)}

@@ -164,6 +164,11 @@ def test_route_list_notes():
     assert "items" in r.json()["data"]
 
 
+def test_route_list_notes_limit_500():
+    r = client.get("/api/notes?limit=500")
+    assert r.status_code == 200
+
+
 def test_route_create_missing_kind():
     r = client.post("/api/notes", json={"kind": "", "title": "t", "content": "c"})
     assert r.status_code == 400
