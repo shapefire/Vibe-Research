@@ -29,3 +29,14 @@ jobs:
       - run: cd frontend && npm run lint
       - run: cd frontend && npm run typecheck
       - run: cd frontend && npm run test:coverage
+
+  compliance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - run: cd backend && pytest tests/test_compliance.py -q
+      - run: python scripts/check_compliance_docs.py
