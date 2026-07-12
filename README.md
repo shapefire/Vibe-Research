@@ -113,6 +113,8 @@ Vibe-Research/
 
 ## 🚀 快速开始
 
+### 方式 A · 本地开发（双进程）
+
 ```bash
 # 后端（:8900）
 cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -122,6 +124,27 @@ cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 cd frontend && npm install && npm run dev
 # 浏览器打开 http://localhost:5899
 ```
+
+### 方式 B · Docker 一键部署（生产 / 自托管）
+
+```bash
+docker compose -f docker/docker-compose.yml up --build
+# 浏览器打开 http://localhost:8900（API + 前端同端口）
+```
+
+**数据持久化：** compose 默认挂载 Docker volume `vr-data` → 容器内 `/data`（`VR_DATA_DIR`）。持仓 `portfolio.json` 写入该 volume，容器重建不丢失。
+
+**可选环境变量：**
+
+| 变量 | 说明 |
+|------|------|
+| `VR_DATA_DIR` | 用户数据目录（compose 默认 `/data`） |
+| `VR_API_KEY` | 公网部署时设置 API 鉴权密钥 |
+| `VR_ALLOW_ORIGINS` | CORS 白名单（默认 `*`，生产建议收紧） |
+
+公网暴露时务必设置 `VR_API_KEY`，并在前端「接入 AI」页底部填写对应访问密钥。
+
+开发者架构说明见 [`docs/architecture/README.md`](docs/architecture/README.md)。
 
 ## 🔌 接入 AI
 
@@ -149,9 +172,14 @@ cd frontend && npm install && npm run dev
 ## 🧪 测试
 
 ```bash
+# 后端
 cd backend && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/pytest -m "not live"   # 离线单测 + API 校验（快、稳，无需联网）
 .venv/bin/pytest -m live          # 联网核对数据源 shape（升级 / 发布前跑一遍）
+
+# 前端
+cd frontend && npm install
+npm run lint && npm run typecheck && npm run test:coverage
 ```
 
 ## ⚖️ 合规

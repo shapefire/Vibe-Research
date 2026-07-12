@@ -1,0 +1,16 @@
+services:
+  vibe-research:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8900:8900"
+    volumes:
+      - vr-data:/data
+    environment:
+      - VR_DATA_DIR=/data
+      - VR_ALLOW_ORIGINS=*
+    restart: unless-stopped
+
+volumes:
+  vr-data:

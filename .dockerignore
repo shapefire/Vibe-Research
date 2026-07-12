@@ -1,0 +1,18 @@
+# Docker build context = repo root（与 docker/.dockerignore 保持同步）
+.git
+.github
+.idea
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.venv
+**/node_modules
+frontend/dist
+backend/.cache
+backend/.env
+**/.env
+**/.env.*
+docs/
+*.md
+!a-stock-data/**/*.md
+!global-stock-data/**/*.md

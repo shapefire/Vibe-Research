@@ -11,7 +11,7 @@ import type { Valuation, Financials, ValPercentile } from "@/lib/api";
 // 从含单位/符号的字符串里取数（"+15.2%" → 15.2；取不到 → null）。
 const num = (s: string | number | null | undefined): number | null => {
   if (s == null) return null;
-  const n = parseFloat(String(s).replace(/[^0-9.\-]/g, ""));
+  const n = parseFloat(String(s).replace(/[^0-9.-]/g, ""));
   return Number.isNaN(n) ? null : n;
 };
 
