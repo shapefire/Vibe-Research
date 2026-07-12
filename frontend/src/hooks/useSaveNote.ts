@@ -11,13 +11,15 @@ export function useSaveNote() {
 
   const save = useCallback(async (
     kind: string, title: string, content: string, contextCode?: string,
+    options?: { snapshot?: NoteSnapshot },
   ) => {
     setSaving(true);
     setError(null);
     try {
-      const snapshot: NoteSnapshot | undefined = contextCode
-        ? await fetchNoteSnapshot(contextCode)
-        : undefined;
+      let snapshot: NoteSnapshot | undefined = options?.snapshot;
+      if (!snapshot && contextCode) {
+        snapshot = await fetchNoteSnapshot(contextCode);
+      }
       await addNote(kind, title, content, snapshot);
       setSaved(true);
     } catch (e) {

@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { Sparkles, Loader2, AlertCircle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { IndexQuote, MarketOverview, ShortTermEmotion } from "@/lib/api";
+import { buildReviewSnapshot } from "@/lib/reviewSnapshot";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { SaveNoteButton } from "@/components/ui/SaveNoteButton";
 import { hasLlm, chatStream } from "@/lib/llm";
@@ -11,9 +13,12 @@ import { ApiError } from "@/lib/api";
 interface Props {
   dataSummary: string;
   today: string;
+  indices: IndexQuote[];
+  overview: MarketOverview | null;
+  emotion: ShortTermEmotion | null;
 }
 
-export function ReviewAiSection({ dataSummary, today }: Props) {
+export function ReviewAiSection({ dataSummary, today, indices, overview, emotion }: Props) {
   const [review, setReview] = useState("");
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewErr, setReviewErr] = useState<string | null>(null);
@@ -64,7 +69,16 @@ export function ReviewAiSection({ dataSummary, today }: Props) {
       {review ? (
         <>
           <div className="prose prose-sm prose-invert mt-4 max-w-none text-foreground"><ReactMarkdown remarkPlugins={[remarkGfm]}>{review}</ReactMarkdown></div>
-          {!reviewLoading && <div className="mt-3"><SaveNoteButton kind="复盘" title={`每日复盘 ${today}`} content={review} /></div>}
+          {!reviewLoading && (
+            <div className="mt-3">
+              <SaveNoteButton
+                kind="复盘"
+                title={`每日复盘 ${today}`}
+                content={review}
+                snapshot={buildReviewSnapshot(indices, overview, emotion)}
+              />
+            </div>
+          )}
         </>
       ) : !needConfig && !reviewErr && !reviewLoading ? (
         <p className="mt-3 text-sm text-muted-foreground">点上方按钮，系统把当天客观数据打包给你的 AI，由它生成复盘。<b className="text-foreground">分析是它给的，我们只负责喂数据。</b></p>

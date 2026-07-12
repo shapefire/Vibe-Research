@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { AlertCircle } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { AskAiButton } from "@/components/ui/AskAiButton";
 import { EarningsSnapshot } from "@/components/ui/EarningsSnapshot";
 import { Disclaimer } from "@/components/ui/Disclaimer";
+import { api } from "@/lib/api";
 import { useStockData } from "./useStockData";
 import { buildStockContext } from "./buildStockContext";
 import { StockSearchBar } from "./StockSearchBar";
@@ -17,6 +19,7 @@ import { GlobalStockPanel } from "./GlobalStockPanel";
 
 export function StockData() {
   const [code, setCode] = useState("");
+  const [compareNoteCount, setCompareNoteCount] = useState(0);
   const data = useStockData();
   const {
     val, reports, news, pctl, fin, anns, depNote,
@@ -26,6 +29,18 @@ export function StockData() {
 
   const handleSearch = () => search(code);
   const aiContext = buildStockContext({ val, reports, anns, pctl, fin, gstock });
+
+  useEffect(() => {
+    if (!val || !/^\d{6}$/.test(code)) {
+      setCompareNoteCount(0);
+      return;
+    }
+    let cancelled = false;
+    api.notesByTag(code, true)
+      .then((data) => { if (!cancelled) setCompareNoteCount(data.total); })
+      .catch(() => { if (!cancelled) setCompareNoteCount(0); });
+    return () => { cancelled = true; };
+  }, [val, code]);
 
   return (
     <div>
@@ -45,6 +60,15 @@ export function StockData() {
       />
 
       <StockSearchBar code={code} loading={loading} onChange={setCode} onSearch={handleSearch} />
+
+      {compareNoteCount >= 2 && /^\d{6}$/.test(code) && (
+        <div className="mb-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm text-muted-foreground">
+          你有 {compareNoteCount} 条 {code} 的研究记录，{" "}
+          <Link to={`/notes/compare?tag=${code}`} className="text-primary hover:underline">
+            查看变化 →
+          </Link>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">

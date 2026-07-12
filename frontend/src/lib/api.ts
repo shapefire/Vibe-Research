@@ -39,6 +39,7 @@ export interface MyReport {
 export interface NoteMeta {
   id: string; kind: string; title: string; ts: number;
   tags?: string[]; snapshot?: NoteSnapshot | null;
+  has_snapshot?: boolean;
 }
 
 export interface NoteDetail extends NoteMeta {
@@ -50,12 +51,48 @@ export interface NoteList {
   total: number;
 }
 
+export interface ReviewMarketSnapshot {
+  indices?: { name: string; price: number; change_pct: number }[];
+  sentiment?: {
+    up: number; down: number; flat: number; zt: number; dt: number;
+    breadth: string; speculation: string;
+  };
+  emotion?: {
+    zt_count: number; dt_count: number; max_boards: number; lianban_count: number;
+    seal_rate: number | null; break_rate: number | null; promotion_rate: number | null;
+  };
+}
+
 export interface NoteSnapshot {
   code?: string;
   quote?: { price: number; pe_ttm?: number; change_pct?: number };
   valuation?: { pe_ttm?: number; pb?: number; mcap_yi?: number };
   valuation_pctile?: { pe_5y?: number; pb_5y?: number };
+  market?: ReviewMarketSnapshot;
   captured_at: string;
+}
+
+export interface DiffEntry {
+  before?: unknown;
+  after?: unknown;
+  delta?: number;
+  delta_pct?: number | null;
+  type?: string;
+  missing_in?: "a" | "b";
+}
+
+export interface CompareResult {
+  note_a: NoteMeta;
+  note_b: NoteMeta;
+  comparable: boolean;
+  reason: string | null;
+  diff: Record<string, DiffEntry>;
+}
+
+export interface NoteByTagList {
+  items: NoteMeta[];
+  total: number;
+  tag: string;
 }
 
 export interface MigrateResult {
@@ -396,4 +433,8 @@ export const api = {
   deleteNote: (id: string) => request<{ ok: boolean; id: string }>(`/notes/${id}`, "DELETE"),
   deleteAllNotes: () => request<{ ok: boolean; count: number }>("/notes", "DELETE"),
   migrateNotes: (notes: NoteDetail[]) => request<MigrateResult>("/notes/migrate", "POST", { notes }),
+  notesByTag: (tag: string, hasSnapshot = true, limit = 50) =>
+    get<NoteByTagList>(`/notes/by-tag?tag=${encodeURIComponent(tag)}&has_snapshot=${hasSnapshot}&limit=${limit}`),
+  compareNotes: (id_a: string, id_b: string) =>
+    request<CompareResult>("/notes/compare", "POST", { id_a, id_b }),
 };

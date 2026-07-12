@@ -14,16 +14,6 @@ import notes
 client = TestClient(app_module.app)
 
 
-@pytest.fixture(autouse=True)
-def isolated_notes_dir(tmp_path, monkeypatch):
-    notes_dir = tmp_path / "notes"
-    monkeypatch.setattr(notes, "NOTES_DIR", str(notes_dir))
-    monkeypatch.setattr(notes, "INDEX_FILE", str(notes_dir / "index.json"))
-    monkeypatch.setattr(notes, "LEGACY_BACKUP", str(notes_dir / "notes_legacy_localStorage.json"))
-    monkeypatch.setenv("VR_NOTES_MAX", "5")
-    monkeypatch.setenv("VR_NOTES_MAX_CONTENT_BYTES", "102400")
-
-
 def _add(kind="复盘", title="测试", content="# 内容", **kwargs):
     return notes.add_note(kind=kind, title=title, content=content, **kwargs)
 

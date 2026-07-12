@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Trash2, ChevronDown, ChevronRight, NotebookPen, Loader2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Trash2, ChevronDown, ChevronRight, NotebookPen, Loader2, GitCompare } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
@@ -98,12 +99,22 @@ export function Notes() {
       <PageHeader
         title="研究记录"
         subtitle="把 AI 复盘 / 要点 / 问答沉淀在本地，随时回看。数据存本地服务 ~/.vibe-research/notes/。"
-        actions={notes.length > 0 && (
-          <button onClick={handleClear}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:text-destructive">
-            <Trash2 className="h-4 w-4" /> 清空
-          </button>
-        )}
+        actions={
+          <div className="flex items-center gap-2">
+            <Link
+              to="/notes/compare"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground hover:border-primary/40 hover:text-primary"
+            >
+              <GitCompare className="h-4 w-4" /> 对比
+            </Link>
+            {notes.length > 0 && (
+              <button onClick={handleClear}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:text-destructive">
+                <Trash2 className="h-4 w-4" /> 清空
+              </button>
+            )}
+          </div>
+        }
       />
 
       {loading ? (

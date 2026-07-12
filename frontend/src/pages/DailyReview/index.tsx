@@ -43,7 +43,13 @@ export function DailyReview() {
       />
 
       <WatchlistPanel />
-      <ReviewAiSection dataSummary={dataSummary} today={today} />
+      <ReviewAiSection
+        dataSummary={dataSummary}
+        today={today}
+        indices={idxList}
+        overview={overview.data}
+        emotion={emotion.data}
+      />
       <MarketOverviewCards overview={overview.data} done={overview.done} />
       <SentimentPanel emotion={emotion.data} done={emotion.done} />
       <TopVolumeTable turnover={turnover.data} done={turnover.done} />

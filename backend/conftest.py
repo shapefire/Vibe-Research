@@ -3,6 +3,8 @@ import os
 import sys
 import tempfile
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(__file__))
 
 # 用户数据隔离：portfolio / myreports 在 import 时按 VR_DATA_DIR / VR_REPORTS_DIR 固化路径，
@@ -26,3 +28,16 @@ def pytest_configure(config):
         "markers",
         "live: 打真实数据源的网络冒烟测（会联网、可能受上游/限流影响；默认可 -m 'not live' 跳过）",
     )
+
+
+@pytest.fixture(autouse=True)
+def isolated_notes_dir(tmp_path, monkeypatch):
+    """隔离 notes 目录，供 notes / compare API 测试复用。"""
+    import notes as notes_mod
+
+    notes_dir = tmp_path / "notes"
+    monkeypatch.setattr(notes_mod, "NOTES_DIR", str(notes_dir))
+    monkeypatch.setattr(notes_mod, "INDEX_FILE", str(notes_dir / "index.json"))
+    monkeypatch.setattr(notes_mod, "LEGACY_BACKUP", str(notes_dir / "notes_legacy_localStorage.json"))
+    monkeypatch.setenv("VR_NOTES_MAX", "5")
+    monkeypatch.setenv("VR_NOTES_MAX_CONTENT_BYTES", "102400")

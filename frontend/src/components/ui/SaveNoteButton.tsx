@@ -1,4 +1,5 @@
 import { Check, BookmarkPlus, Loader2 } from "lucide-react";
+import type { NoteSnapshot } from "@/lib/api";
 import { useSaveNote } from "@/hooks/useSaveNote";
 
 interface Props {
@@ -6,17 +7,18 @@ interface Props {
   title: string;
   content: string;
   contextCode?: string;
+  snapshot?: NoteSnapshot;
 }
 
 // 把一段 AI 结果存入「研究记录」（沉淀）。存本地服务，不上传。
-export function SaveNoteButton({ kind, title, content, contextCode }: Props) {
+export function SaveNoteButton({ kind, title, content, contextCode, snapshot }: Props) {
   const { save, saving, saved } = useSaveNote();
 
   if (!content.trim()) return null;
 
   return (
     <button
-      onClick={() => save(kind, title, content, contextCode)}
+      onClick={() => save(kind, title, content, contextCode, snapshot ? { snapshot } : undefined)}
       disabled={saved || saving}
       className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-60"
     >

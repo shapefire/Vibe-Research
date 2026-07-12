@@ -222,6 +222,38 @@ def get_note(note_id: str) -> dict:
     return {**hit, "content": content}
 
 
+def get_meta(note_id: str) -> dict | None:
+    """仅 index.json 元数据；不存在返回 None。"""
+    try:
+        nid = _validate_id(note_id)
+    except NoteError:
+        return None
+    data = _load_index()
+    return next((i for i in data.get("items", []) if i.get("id") == nid), None)
+
+
+def _has_snapshot(item: dict) -> bool:
+    snap = item.get("snapshot")
+    return isinstance(snap, dict) and bool(snap)
+
+
+def list_by_tag(tag: str, *, has_snapshot: bool = False, limit: int = 50) -> dict:
+    """按 tag 筛选笔记，按 ts 降序。"""
+    data = _load_index()
+    items = [i for i in data.get("items", []) if tag in (i.get("tags") or [])]
+    if has_snapshot:
+        items = [i for i in items if _has_snapshot(i)]
+    items.sort(key=lambda x: x.get("ts", 0), reverse=True)
+    total = len(items)
+    page = items[:limit]
+    out = []
+    for i in page:
+        row = {k: v for k, v in i.items() if k != "snapshot"}
+        row["has_snapshot"] = _has_snapshot(i)
+        out.append(row)
+    return {"items": out, "total": total, "tag": tag}
+
+
 def add_note(
     kind: str,
     title: str,

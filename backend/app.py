@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import astock
 import chat as chat_layer
 import cli_runtime
+import compare as compare_mod
 from data_fetcher.base import AllSourcesFailed, FetchResult
 from data_fetcher.registry import registry
 import gstock
@@ -34,6 +36,8 @@ import myreports as mr
 import notes as notes_mod
 
 app = FastAPI(title="Vibe-Research API", version="0.1.3")
+
+_log = logging.getLogger("vibe-research")
 
 # 每半小时后台刷新持仓数据
 pf.start_scheduler(1800)
@@ -259,6 +263,38 @@ class MigrateIn(BaseModel):
     notes: list[dict]
 
 
+class CompareRequest(BaseModel):
+    id_a: str
+    id_b: str
+
+
+def _note_summary(meta: dict) -> dict:
+    return {
+        "id": meta.get("id"),
+        "title": meta.get("title"),
+        "ts": meta.get("ts", 0),
+        "kind": meta.get("kind"),
+        "tags": meta.get("tags") or [],
+    }
+
+
+def _compare_response(
+    meta_a: dict,
+    meta_b: dict,
+    *,
+    comparable: bool,
+    diff: dict | None = None,
+    reason: str | None = None,
+) -> dict:
+    return {
+        "note_a": _note_summary(meta_a),
+        "note_b": _note_summary(meta_b),
+        "comparable": comparable,
+        "reason": reason,
+        "diff": diff or {},
+    }
+
+
 @app.get("/api/notes")
 def notes_list(
     kind: str | None = None,
@@ -282,6 +318,55 @@ def notes_migrate(body: MigrateIn):
 def notes_delete_all():
     """清空所有研究记录。"""
     return {"data": notes_mod.delete_all_notes()}
+
+
+@app.post("/api/notes/compare")
+def notes_compare(body: CompareRequest):
+    """对比两条笔记的 snapshot 客观数据 delta。"""
+    if body.id_a == body.id_b:
+        raise HTTPException(400, "不能对比同一条笔记")
+    meta_a = notes_mod.get_meta(body.id_a)
+    meta_b = notes_mod.get_meta(body.id_b)
+    if not meta_a or not meta_b:
+        raise HTTPException(404, "笔记不存在")
+    snap_a = meta_a.get("snapshot")
+    snap_b = meta_b.get("snapshot")
+    if not isinstance(snap_a, dict) or not snap_a or not isinstance(snap_b, dict) or not snap_b:
+        resp = _compare_response(meta_a, meta_b, comparable=False, reason="missing_snapshot")
+        _log.info(
+            "compare id_a=%s id_b=%s comparable=%s keys=%d",
+            body.id_a, body.id_b, False, 0,
+        )
+        return {"data": resp}
+    tree = compare_mod.diff_snapshots(snap_a, snap_b)
+    flat = compare_mod.flatten_diff(tree)
+    if not flat:
+        resp = _compare_response(meta_a, meta_b, comparable=False, reason="no_common_keys")
+        _log.info(
+            "compare id_a=%s id_b=%s comparable=%s keys=%d",
+            body.id_a, body.id_b, False, 0,
+        )
+        return {"data": resp}
+    if meta_a.get("ts", 0) > meta_b.get("ts", 0):
+        meta_a, meta_b = meta_b, meta_a
+        flat = compare_mod.swap_before_after(flat)
+    resp = _compare_response(meta_a, meta_b, comparable=True, diff=flat)
+    _log.info(
+        "compare id_a=%s id_b=%s comparable=%s keys=%d",
+        body.id_a, body.id_b, True, len(flat),
+    )
+    return {"data": resp}
+
+
+@app.get("/api/notes/by-tag")
+def notes_by_tag(
+    tag: str,
+    has_snapshot: bool = False,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """按标的 tag 筛选笔记，供对比选择器使用。"""
+    tag = _validate(tag)
+    return {"data": notes_mod.list_by_tag(tag, has_snapshot=has_snapshot, limit=limit)}
 
 
 @app.get("/api/notes/{note_id}")
