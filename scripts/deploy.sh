@@ -31,6 +31,11 @@ usage() {
 log() { printf '[deploy] %s\n' "$*"; }
 die() { log "错误: $*"; exit 1; }
 
+# 忽略 chmod 等仅权限变更（服务器上 chmod +x deploy.sh 不应阻断部署）
+git_diff_quiet() {
+  git -c core.fileMode=false diff --quiet "$@"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --branch)
@@ -84,8 +89,10 @@ log "分支: ${TARGET_BRANCH}（当前: ${CURRENT_BRANCH}）"
 log "提交: $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
 
 if [[ "${SKIP_PULL}" -eq 0 ]]; then
-  if ! git diff --quiet || ! git diff --cached --quiet; then
-    die "工作区有未提交改动，请先 commit/stash 或使用 --no-pull"
+  if ! git_diff_quiet || ! git_diff_quiet --cached; then
+    log "以下未提交改动（不含仅权限变更）会阻断 git pull："
+    git -c core.fileMode=false status --short
+    die "请先 commit/stash 真实内容改动，或使用 --no-pull 跳过拉代码"
   fi
 
   log "拉取最新代码..."

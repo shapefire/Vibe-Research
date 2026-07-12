@@ -112,11 +112,17 @@ docker compose -f docker/docker-compose.yml ps
 
 **工作区有未提交改动**
 
+脚本会忽略 **仅权限变更**（如 `chmod +x deploy.sh`），但若有真实内容改动仍会中止：
+
 ```
-错误: 工作区有未提交改动，请先 commit/stash 或使用 --no-pull
+错误: 请先 commit/stash 真实内容改动，或使用 --no-pull 跳过拉代码
 ```
 
-服务器上不要直接改代码；若仅为重建镜像，加 `--no-pull`。
+若代码已在服务器上更新完毕、只想重建镜像，使用：
+
+```bash
+./deploy.sh --no-pull
+```
 
 **健康检查超时**
 
