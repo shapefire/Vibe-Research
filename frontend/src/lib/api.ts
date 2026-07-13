@@ -68,6 +68,7 @@ export interface NoteSnapshot {
   quote?: { price: number; pe_ttm?: number; change_pct?: number };
   valuation?: { pe_ttm?: number; pb?: number; mcap_yi?: number };
   valuation_pctile?: { pe_5y?: number; pb_5y?: number };
+  capital_flow?: { main_net?: number };
   market?: ReviewMarketSnapshot;
   captured_at: string;
 }

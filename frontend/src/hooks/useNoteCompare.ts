@@ -68,6 +68,7 @@ export const DIFF_LABELS: Record<string, string> = {
   "valuation.mcap_yi": "市值(亿)",
   "valuation_pctile.pe_5y": "PE 5年分位",
   "valuation_pctile.pb_5y": "PB 5年分位",
+  "capital_flow.main_net": "主力净流入",
   "market.sentiment.up": "上涨家数",
   "market.sentiment.down": "下跌家数",
   "market.sentiment.flat": "平盘家数",

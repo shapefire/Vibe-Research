@@ -3,10 +3,11 @@ import { api, type NoteSnapshot } from "./api";
 /** 采集问 AI 场景下的客观行情/估值快照；失败不阻断保存。 */
 export async function fetchNoteSnapshot(code: string): Promise<NoteSnapshot | undefined> {
   try {
-    const [quoteMap, valuation, percentile] = await Promise.all([
+    const [quoteMap, valuation, percentile, fundFlow] = await Promise.all([
       api.quote(code),
       api.valuation(code),
       api.percentile(code),
+      api.fundFlow(code).catch(() => [] as Awaited<ReturnType<typeof api.fundFlow>>),
     ]);
     const quote = quoteMap[code];
     if (!quote) return undefined;
@@ -25,6 +26,9 @@ export async function fetchNoteSnapshot(code: string): Promise<NoteSnapshot | un
       } : undefined,
       valuation_pctile: percentile?.metrics?.pe_ttm
         ? { pe_5y: percentile.metrics.pe_ttm.percentile }
+        : undefined,
+      capital_flow: fundFlow.length > 0
+        ? { main_net: fundFlow[fundFlow.length - 1].main_net }
         : undefined,
       captured_at,
     };

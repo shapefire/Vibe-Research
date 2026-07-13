@@ -22,6 +22,9 @@ describe("fetchNoteSnapshot", () => {
       if (url.includes("/valuation")) {
         return { ok: true, status: 200, json: async () => ({ data: { pe_ttm: 28.5, pb: 8.1, mcap_yi: 21000 } }) };
       }
+      if (url.includes("/fund-flow")) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ date: "2026-07-12", main_net: -1.2e8, small_net: 0, mid_net: 0, large_net: 0, super_net: 0 }] }) };
+      }
       return { ok: true, status: 200, json: async () => ({ data: {} }) };
     }));
 
@@ -29,6 +32,7 @@ describe("fetchNoteSnapshot", () => {
     expect(snap?.code).toBe("600519");
     expect(snap?.quote?.price).toBe(1680);
     expect(snap?.valuation_pctile?.pe_5y).toBe(72);
+    expect(snap?.capital_flow?.main_net).toBe(-1.2e8);
     expect(snap?.captured_at).toContain("+08:00");
   });
 
