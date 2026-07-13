@@ -74,6 +74,19 @@ describe("notes API client", () => {
     expect(body.tags).toEqual(["600519"]);
   });
 
+  it("addNote uses contextCode as tag when snapshot missing", async () => {
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", vi.fn(async (_input, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        body = JSON.parse(init.body as string);
+        return { ok: true, status: 200, json: async () => ({ data: { id: "4-d", kind: "问AI", title: "t", ts: 1 } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: { items: [], total: 0 } }) };
+    }));
+    await addNote("问AI", "t", "c", undefined, "600519");
+    expect(body.tags).toEqual(["600519"]);
+  });
+
   it("deleteNote calls DELETE then reloads", async () => {
     mockFetch({
       "DELETE /api/notes/abc": () => ({ ok: true, id: "abc" }),

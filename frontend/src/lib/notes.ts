@@ -45,9 +45,12 @@ export async function addNote(
   title: string,
   content: string,
   snapshot?: NoteSnapshot | null,
+  contextCode?: string,
 ): Promise<Note[]> {
-  const tags = snapshot?.code ? [snapshot.code] : [];
-  await api.createNote({ kind, title, content, tags, snapshot: snapshot ?? undefined });
+  const tags = new Set<string>();
+  if (snapshot?.code) tags.add(snapshot.code);
+  if (contextCode && /^\d{6}$/.test(contextCode)) tags.add(contextCode);
+  await api.createNote({ kind, title, content, tags: [...tags], snapshot: snapshot ?? undefined });
   return loadNotes();
 }
 

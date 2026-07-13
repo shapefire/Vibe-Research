@@ -20,7 +20,7 @@ export function useSaveNote() {
       if (!snapshot && contextCode) {
         snapshot = await fetchNoteSnapshot(contextCode);
       }
-      await addNote(kind, title, content, snapshot);
+      await addNote(kind, title, content, snapshot, contextCode);
       setSaved(true);
     } catch (e) {
       if (e instanceof ApiError) {

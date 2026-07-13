@@ -237,10 +237,20 @@ def _has_snapshot(item: dict) -> bool:
     return isinstance(snap, dict) and bool(snap)
 
 
+def _note_matches_tag(item: dict, tag: str) -> bool:
+    """匹配 tags 或 snapshot.code（兼容旧笔记未写 tags 的情况）。"""
+    if tag in (item.get("tags") or []):
+        return True
+    snap = item.get("snapshot")
+    if isinstance(snap, dict) and snap.get("code") == tag:
+        return True
+    return False
+
+
 def list_by_tag(tag: str, *, has_snapshot: bool = False, limit: int = 50) -> dict:
     """按 tag 筛选笔记，按 ts 降序。"""
     data = _load_index()
-    items = [i for i in data.get("items", []) if tag in (i.get("tags") or [])]
+    items = [i for i in data.get("items", []) if _note_matches_tag(i, tag)]
     if has_snapshot:
         items = [i for i in items if _has_snapshot(i)]
     items.sort(key=lambda x: x.get("ts", 0), reverse=True)

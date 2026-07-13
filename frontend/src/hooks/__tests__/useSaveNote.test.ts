@@ -28,7 +28,7 @@ describe("useSaveNote", () => {
       await result.current.save("复盘", "标题", "内容");
     });
     expect(result.current.saved).toBe(true);
-    expect(mockedAddNote).toHaveBeenCalledWith("复盘", "标题", "内容", undefined);
+    expect(mockedAddNote).toHaveBeenCalledWith("复盘", "标题", "内容", undefined, undefined);
   });
 
   it("sets error on failure", async () => {

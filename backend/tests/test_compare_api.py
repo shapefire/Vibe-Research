@@ -74,6 +74,15 @@ def test_by_tag_has_snapshot(isolated_notes_dir):
     assert data["items"][0]["has_snapshot"] is True
 
 
+def test_by_tag_matches_snapshot_code_without_tags(isolated_notes_dir):
+    """兼容仅 snapshot.code 有值、tags 为空的旧笔记。"""
+    _add(tags=[], snapshot={"code": "600519", "quote": {"price": 1680.0}})
+    resp = client.get("/api/notes/by-tag?tag=600519")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["total"] == 1
+
+
 def test_by_tag_invalid(isolated_notes_dir):
     resp = client.get("/api/notes/by-tag?tag=abc")
     assert resp.status_code == 400
