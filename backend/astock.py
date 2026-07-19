@@ -330,6 +330,59 @@ def _probe_tdx_server(ip: str, port: int, timeout: float = 2.0) -> bool:
         return False
 
 
+def _mootdx_config_path():
+    """~/.mootdx/config.json；可测试时 monkeypatch。"""
+    from pathlib import Path
+
+    from mootdx.utils import get_config_path
+
+    return Path(get_config_path("config.json"))
+
+
+def _read_mootdx_hq(config_path=None) -> tuple[str, int] | None:
+    path = config_path or _mootdx_config_path()
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    hq = (data.get("BESTIP") or {}).get("HQ")
+    if isinstance(hq, (list, tuple)) and len(hq) >= 2 and hq[0]:
+        try:
+            return (str(hq[0]), int(hq[1]))
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _ensure_mootdx_config(hq: tuple[str, int], config_path=None) -> None:
+    """写入/修复 BESTIP.HQ，避免 mootdx.setup() 在缺配置时自动跑 bestip。
+
+    干净 Docker 镜像无 ~/.mootdx/config.json 时，Quotes.factory → config.setup()
+    会调用 bestip()，通达信不可达即打日志：请手动运行`python -m mootdx bestip`。
+    """
+    path = config_path or _mootdx_config_path()
+    if _read_mootdx_hq(path) is not None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict = {}
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                payload = raw
+        except (OSError, json.JSONDecodeError, TypeError):
+            payload = {}
+    bestip = dict(payload.get("BESTIP") or {})
+    bestip["HQ"] = [hq[0], int(hq[1])]
+    bestip.setdefault("EX", "")
+    bestip.setdefault("GP", "")
+    payload["BESTIP"] = bestip
+    payload.setdefault("TDXDIR", "C:/new_tdx")
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _mootdx_client():
     """创建 mootdx 客户端，规避 BESTIP.HQ 空串导致的 unpack 失败。"""
     try:
@@ -339,18 +392,24 @@ def _mootdx_client():
 
     for ip, port in _TDX_SERVERS:
         if _probe_tdx_server(ip, port):
+            _ensure_mootdx_config((ip, port))
             return Quotes.factory(market="std", server=(ip, port))
-    try:
-        return Quotes.factory(market="std", bestip=True)
-    except Exception:
-        pass
-    try:
-        return Quotes.factory(market="std")
-    except Exception as e:
-        raise RuntimeError(
-            "所有 mootdx 服务器均不可达，请检查网络或更新 _TDX_SERVERS。"
-            f"原始错误：{e}"
-        ) from e
+
+    # 禁止 bestip=True：Docker/海外环境几乎必失败并刷 error 日志。
+    # 若用户本地已跑过 bestip、config 里有可用 HQ，仍可裸 factory。
+    existing = _read_mootdx_hq()
+    if existing is not None:
+        try:
+            return Quotes.factory(market="std", server=existing)
+        except Exception as e:
+            raise RuntimeError(
+                "所有 mootdx 服务器均不可达，请检查网络或更新 _TDX_SERVERS。"
+                f"原始错误：{e}"
+            ) from e
+
+    raise RuntimeError(
+        "所有 mootdx 服务器均不可达，请检查网络或更新 _TDX_SERVERS。"
+    )
 
 
 def _fetch_kline(code: str, category: int = 4, offset: int = 60) -> list[dict]:

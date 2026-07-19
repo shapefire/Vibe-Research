@@ -56,8 +56,9 @@ def test_parse_gtimg_bad_line_ignored():
     assert astock._parse_gtimg("") == {}
 
 
-def test_mootdx_client_uses_reachable_server(monkeypatch):
+def test_mootdx_client_uses_reachable_server(monkeypatch, tmp_path):
     calls: list[tuple] = []
+    cfg = tmp_path / "config.json"
 
     class FakeQuotes:
         @staticmethod
@@ -66,6 +67,7 @@ def test_mootdx_client_uses_reachable_server(monkeypatch):
             return f"client-{server}"
 
     monkeypatch.setattr(astock, "_probe_tdx_server", lambda ip, port, timeout=2.0: ip == "119.97.185.59")
+    monkeypatch.setattr(astock, "_mootdx_config_path", lambda: cfg)
     import sys
     fake_mod = type(sys)("mootdx.quotes")
     fake_mod.Quotes = FakeQuotes
@@ -75,6 +77,43 @@ def test_mootdx_client_uses_reachable_server(monkeypatch):
     client = astock._mootdx_client()
     assert client == "client-('119.97.185.59', 7709)"
     assert calls[0] == ("std", ("119.97.185.59", 7709), False)
+    assert cfg.exists()
+    import json
+    assert json.loads(cfg.read_text(encoding="utf-8"))["BESTIP"]["HQ"] == ["119.97.185.59", 7709]
+
+
+def test_mootdx_client_no_reachable_server_skips_bestip(monkeypatch, tmp_path):
+    """Docker 常见：通达信 TCP 不可达时，禁止 bestip=True（会刷「请手动运行 python -m mootdx bestip」）。"""
+    calls: list[tuple] = []
+    cfg = tmp_path / "config.json"
+
+    class FakeQuotes:
+        @staticmethod
+        def factory(*, market, server=None, bestip=False):
+            calls.append((market, server, bestip))
+            return "should-not-reach"
+
+    monkeypatch.setattr(astock, "_probe_tdx_server", lambda *a, **k: False)
+    monkeypatch.setattr(astock, "_mootdx_config_path", lambda: cfg)
+    import sys
+    fake_mod = type(sys)("mootdx.quotes")
+    fake_mod.Quotes = FakeQuotes
+    monkeypatch.setitem(sys.modules, "mootdx.quotes", fake_mod)
+    monkeypatch.setitem(sys.modules, "mootdx", type(sys)("mootdx"))
+
+    import pytest
+    with pytest.raises(RuntimeError, match="不可达"):
+        astock._mootdx_client()
+    assert calls == []
+
+
+def test_ensure_mootdx_config_fills_empty_hq(tmp_path):
+    cfg = tmp_path / "config.json"
+    cfg.write_text('{"BESTIP": {"HQ": "", "EX": "", "GP": ""}}', encoding="utf-8")
+    astock._ensure_mootdx_config(("1.2.3.4", 7709), config_path=cfg)
+    import json
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    assert data["BESTIP"]["HQ"] == ["1.2.3.4", 7709]
 
 
 def test_mootdx_frequency_mapping():
