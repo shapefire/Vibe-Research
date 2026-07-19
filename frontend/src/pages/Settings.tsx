@@ -3,6 +3,7 @@ import { KeyRound, Sparkles, ShieldCheck, Check, Trash2, Terminal } from "lucide
 import { PageHeader } from "@/components/ui/PageHeader";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { SourceHealthPanel } from "@/components/ui/SourceHealthPanel";
+import { Disclaimer } from "@/components/ui/Disclaimer";
 import { toast } from "sonner";
 import { loadLlm, saveLlm, clearLlm } from "@/lib/llm";
 import { loadAccessKey, saveAccessKey } from "@/lib/api";
@@ -206,6 +207,8 @@ export function Settings() {
       </GlassCard>
 
       <NotifySettingsCard />
+
+      <Disclaimer />
     </div>
   );
 }

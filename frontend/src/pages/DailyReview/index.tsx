@@ -6,13 +6,15 @@ import { MarketIndices } from "./MarketIndices";
 import { WatchlistPanel } from "./WatchlistPanel";
 import { ReviewAiSection } from "./ReviewAiSection";
 import { ScheduledReviewCard } from "./ScheduledReviewCard";
+import { DigestSummaryCard } from "./DigestSummaryCard";
 import { MarketOverviewCards } from "./MarketOverviewCards";
 import { SentimentPanel } from "./SentimentPanel";
 import { TopVolumeTable } from "./TopVolumeTable";
 import { SectorFlowPanel } from "./SectorFlowPanel";
 
 export function DailyReview() {
-  const { overview, emotion, turnover, indices, globalIdx, scheduledReview, refreshAll } = useDailyReview();
+  const { overview, emotion, turnover, indices, globalIdx, scheduledReview, digest, refreshAll } =
+    useDailyReview();
 
   const today = new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
   const idxList = indices.data ?? [];
@@ -33,6 +35,13 @@ export function DailyReview() {
             suggestions={["今天大盘怎么走", "哪些指数领涨领跌", "盘面有什么值得注意"]}
           />
         }
+      />
+
+      <DigestSummaryCard
+        digest={digest.data}
+        loading={digest.loading}
+        done={digest.done}
+        error={digest.error}
       />
 
       <ScheduledReviewCard

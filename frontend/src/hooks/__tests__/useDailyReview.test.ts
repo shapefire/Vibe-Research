@@ -30,7 +30,7 @@ describe("useDailyReview", () => {
     vi.clearAllMocks();
   });
 
-  it("triggers 6 API calls on mount", async () => {
+  it("triggers 7 API calls on mount", async () => {
     renderHook(() => useDailyReview());
     await waitFor(() => {
       expect(mockedApi.marketOverview).toHaveBeenCalled();
@@ -38,6 +38,7 @@ describe("useDailyReview", () => {
       expect(mockedApi.turnoverTop).toHaveBeenCalled();
       expect(mockedApi.indices).toHaveBeenCalled();
       expect(mockedApi.globalIndices).toHaveBeenCalled();
+      expect(mockedApi.digestLatest).toHaveBeenCalled();
       expect(mockedApi.reviewLatest).toHaveBeenCalled();
     });
   });
@@ -53,6 +54,7 @@ describe("useDailyReview", () => {
       expect(mockedApi.turnoverTop).toHaveBeenCalled();
       expect(mockedApi.indices).toHaveBeenCalled();
       expect(mockedApi.globalIndices).toHaveBeenCalled();
+      expect(mockedApi.digestLatest).toHaveBeenCalled();
       expect(mockedApi.reviewLatest).toHaveBeenCalled();
     });
   });

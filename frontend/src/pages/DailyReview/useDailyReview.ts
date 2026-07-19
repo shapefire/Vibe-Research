@@ -9,6 +9,7 @@ export function useDailyReview() {
   const indices = useApiQuery(useCallback(() => api.indices(), []), []);
   const globalIdx = useApiQuery(useCallback(() => api.globalIndices(), []), []);
   const scheduledReview = useApiQuery(useCallback(() => api.reviewLatest(), []), []);
+  const digest = useApiQuery(useCallback(() => api.digestLatest(), []), []);
 
   const refreshAll = useCallback(() => {
     overview.refetch();
@@ -17,7 +18,8 @@ export function useDailyReview() {
     indices.refetch();
     globalIdx.refetch();
     scheduledReview.refetch();
-  }, [overview, emotion, turnover, indices, globalIdx, scheduledReview]);
+    digest.refetch();
+  }, [overview, emotion, turnover, indices, globalIdx, scheduledReview, digest]);
 
-  return { overview, emotion, turnover, indices, globalIdx, scheduledReview, refreshAll };
+  return { overview, emotion, turnover, indices, globalIdx, scheduledReview, digest, refreshAll };
 }

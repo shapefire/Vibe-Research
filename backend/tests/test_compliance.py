@@ -100,9 +100,38 @@ def test_fixtures_count():
 # 06/07 预埋（模块未建时 skip）
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skip(reason="待 feat 06 digest.py 实现后启用")
 def test_digest_template_compliant():
     assert DIGEST_FOOTER == "*纯数据摘要，不构成投资建议*"
+    from digest import DISCLAIMER, DailyDigest, to_markdown
+
+    assert DISCLAIMER == DIGEST_FOOTER
+    digest = DailyDigest(
+        date="2026-07-19",
+        market={
+            "sh_index": {"close": None, "change_pct": None},
+            "sz_index": {"close": None, "change_pct": None},
+            "global": {},
+            "sentiment": {
+                "up_count": None,
+                "down_count": None,
+                "limit_up": None,
+                "limit_down": None,
+            },
+        },
+        watchlist_summary={
+            "total": 0,
+            "up": 0,
+            "down": 0,
+            "unconfigured": True,
+            "items": [],
+        },
+        portfolio_summary=None,
+        intel_summary={"new_items": 0, "tracks": []},
+        generated_at="2026-07-19T18:00:00+08:00",
+    )
+    md = to_markdown(digest)
+    assert DIGEST_FOOTER in md
+    assert_compliant(md, context="digest")
 
 
 def test_push_template_compliant():

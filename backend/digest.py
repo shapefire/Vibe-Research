@@ -16,13 +16,14 @@ import market
 import newsradar
 import portfolio as pf
 import watchlist
+from compliance import DIGEST_FOOTER, assert_compliant
 
 _log = logging.getLogger("vibe.digest")
 
 CACHE_DIR = os.environ.get("VR_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".vibe-research")
 DIGESTS_DIR = Path(CACHE_DIR) / "digests"
 DEFAULT_TIMEZONE = "Asia/Shanghai"
-DISCLAIMER = "*纯数据摘要，不构成投资建议。详细分析请打开看板使用你的 AI。*"
+DISCLAIMER = DIGEST_FOOTER
 _LOCK = threading.Lock()
 _NA = {"close": None, "change_pct": None}
 
@@ -312,7 +313,9 @@ def to_markdown(digest: DailyDigest) -> str:
     lines.append("")
     lines.append("---")
     lines.append(DISCLAIMER)
-    return "\n".join(lines)
+    md = "\n".join(lines)
+    assert_compliant(md, context="digest")
+    return md
 
 
 def _from_dict(data: dict) -> DailyDigest:
