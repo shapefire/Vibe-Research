@@ -143,10 +143,22 @@ async function request<T>(path: string, method: "GET" | "POST" | "DELETE" | "PUT
     }
     if (resp.status === 503) {
       const detail = payload?.detail;
-      const msg = typeof detail === "object" ? detail?.detail : detail;
+      const msg =
+        typeof detail === "string"
+          ? detail
+          : detail && typeof detail === "object"
+            ? (detail.detail || detail.message)
+            : null;
       throw new ApiError(msg || "数据源暂时不可用，请稍后重试", 503);
     }
-    throw new ApiError(payload?.detail || `HTTP ${resp.status}`, resp.status);
+    const detail = payload?.detail;
+    const errMsg =
+      typeof detail === "string"
+        ? detail
+        : detail && typeof detail === "object"
+          ? (detail.detail || JSON.stringify(detail))
+          : `HTTP ${resp.status}`;
+    throw new ApiError(errMsg, resp.status);
   }
   return (payload?.data ?? payload) as T;
 }
@@ -176,10 +188,22 @@ async function requestWithMeta<T>(path: string): Promise<ApiResult<T>> {
     }
     if (resp.status === 503) {
       const detail = payload?.detail;
-      const msg = typeof detail === "object" ? detail?.detail : detail;
+      const msg =
+        typeof detail === "string"
+          ? detail
+          : detail && typeof detail === "object"
+            ? (detail.detail || detail.message)
+            : null;
       throw new ApiError(msg || "数据源暂时不可用，请稍后重试", 503);
     }
-    throw new ApiError(payload?.detail || `HTTP ${resp.status}`, resp.status);
+    const detail = payload?.detail;
+    const errMsg =
+      typeof detail === "string"
+        ? detail
+        : detail && typeof detail === "object"
+          ? (detail.detail || JSON.stringify(detail))
+          : `HTTP ${resp.status}`;
+    throw new ApiError(errMsg, resp.status);
   }
   return {
     data: (payload?.data ?? payload) as T,

@@ -29,6 +29,23 @@ export function NotifySettingsCard() {
     setFeishuWebhook("");
   };
 
+  const buildSaveBody = () => ({
+    enabled,
+    dashboard_url: dashboardUrl.trim(),
+    channels: [
+      {
+        provider: "wecom",
+        enabled: wecomEnabled,
+        ...(wecomWebhook.trim() ? { webhook_url: wecomWebhook.trim() } : {}),
+      },
+      {
+        provider: "feishu",
+        enabled: feishuEnabled,
+        ...(feishuWebhook.trim() ? { webhook_url: feishuWebhook.trim() } : {}),
+      },
+    ],
+  });
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -49,45 +66,46 @@ export function NotifySettingsCard() {
   const save = async () => {
     setSaving(true);
     try {
-      const body: {
-        enabled: boolean;
-        dashboard_url: string;
-        channels: { provider: string; enabled: boolean; webhook_url?: string }[];
-      } = {
-        enabled,
-        dashboard_url: dashboardUrl.trim(),
-        channels: [
-          {
-            provider: "wecom",
-            enabled: wecomEnabled,
-            ...(wecomWebhook.trim() ? { webhook_url: wecomWebhook.trim() } : {}),
-          },
-          {
-            provider: "feishu",
-            enabled: feishuEnabled,
-            ...(feishuWebhook.trim() ? { webhook_url: feishuWebhook.trim() } : {}),
-          },
-        ],
-      };
-      const st = await api.notifyUpdateConfig(body);
+      const st = await api.notifyUpdateConfig(buildSaveBody());
       applyStatus(st);
       toast.success("推送配置已保存到服务端");
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "保存失败");
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
   const test = async (provider: string) => {
+    const channelOn = provider === "wecom" ? wecomEnabled : feishuEnabled;
+    const typedWebhook = provider === "wecom" ? wecomWebhook.trim() : feishuWebhook.trim();
+    const hint = channels.find((c) => c.provider === provider);
+    if (!channelOn) {
+      toast.error(`请先勾选启用「${provider === "wecom" ? "企业微信" : "飞书"}」`);
+      return;
+    }
+    if (!typedWebhook && !hint?.configured) {
+      toast.error("请先粘贴 Webhook 地址");
+      return;
+    }
+
     setTesting(provider);
     try {
+      // 测试前先保存；并确保总开关打开（否则日常定时也不会推）
+      const st = await api.notifyUpdateConfig({
+        ...buildSaveBody(),
+        enabled: true,
+      });
+      applyStatus(st);
+
       const res = await api.notifyTest(provider);
       const row = res.results.find((r) => r.provider_id === provider) || res.results[0];
-      if (row?.ok) toast.success(`${provider} 测试推送成功`);
+      if (row?.ok) toast.success("测试推送成功，请到群里查看");
       else toast.error(row?.error || "测试失败");
-      const st = await api.notifyStatus();
-      applyStatus(st);
+      const st2 = await api.notifyStatus();
+      applyStatus(st2);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "测试失败");
     } finally {
@@ -118,7 +136,7 @@ export function NotifySettingsCard() {
         <a className="text-primary hover:underline" href="https://github.com/simonlin1212/Vibe-Research/blob/main/docs/notify-setup.md" target="_blank" rel="noreferrer">
           docs/notify-setup.md
         </a>
-        。
+        。点「测试推送」会先保存当前表单再发送。
       </p>
 
       <label className="mb-3 flex items-center gap-2 text-sm">
@@ -151,7 +169,7 @@ export function NotifySettingsCard() {
                 </label>
                 <button
                   type="button"
-                  disabled={!!testing}
+                  disabled={!!testing || saving}
                   onClick={() => test(ch.id)}
                   className="rounded-lg bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/25 disabled:opacity-50"
                 >
@@ -183,7 +201,7 @@ export function NotifySettingsCard() {
         <button
           type="button"
           disabled={saving}
-          onClick={save}
+          onClick={() => void save()}
           className="rounded-lg bg-primary/15 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/25 disabled:opacity-50"
         >
           {saving ? "保存中…" : "保存推送配置"}

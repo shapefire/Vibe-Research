@@ -557,20 +557,27 @@ def notify_status():
 
 
 @app.post("/api/notify/test")
-def notify_test(request: Request, body: NotifyTestBody | None = None):
+def notify_test(request: Request, body: NotifyTestBody = NotifyTestBody()):
+    """测试推送。指定 provider 时可在总开关关闭时仍强制测该渠道（便于验 Webhook）。"""
     _require_mutating_auth(request)
     from notify.service import NotifyService
     from notify.registry import ProviderRegistry
     import notify.providers  # noqa: F401
 
-    provider = body.provider if body else None
+    provider = (body.provider or "").strip() or None
     if provider and ProviderRegistry.get(provider) is None:
         raise HTTPException(400, f"未知 provider：{provider}")
     svc = NotifyService()
     cfg = svc._loader()
+    # 勿用 503：前端把 503 统一映射成「数据源暂时不可用」
     if not cfg.get("enabled") and not provider:
-        raise HTTPException(503, "推送总开关未开启")
+        raise HTTPException(400, "推送总开关未开启：请先打开总开关并保存，或指定渠道再测")
     results = svc.send_test(provider)
+    if not results:
+        raise HTTPException(
+            400,
+            "没有可测试的渠道：请启用渠道、填写 Webhook 并点「保存推送配置」后再测",
+        )
     return {
         "results": [
             {
