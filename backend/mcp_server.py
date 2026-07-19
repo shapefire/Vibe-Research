@@ -1,7 +1,7 @@
 """Vibe-Research MCP server —— 把 A股数据工具暴露给 Claude Code 等 agent。
 
-零第三方依赖（纯标准库 JSON-RPC over stdio），复用 astock 数据层 +
-chat.py 里的工具定义。给「订阅接入 / 高手」通道用：agent 用自己的
+零第三方依赖（纯标准库 JSON-RPC over stdio），复用 tools 注册表 +
+astock 数据层。给「订阅接入 / 高手」通道用：agent 用自己的
 订阅额度直接调数据、多步分析，不占本产品成本。
 
 挂进 Claude Code：
@@ -15,20 +15,10 @@ from __future__ import annotations
 import json
 import sys
 
-import chat  # 复用 TOOLS 定义 + _exec_tool 执行逻辑（内含 astock）
+import tools as tools_mod
 
-SERVER_INFO = {"name": "vibe-research", "version": "0.1.3"}
+SERVER_INFO = {"name": "vibe-research", "version": "0.2.0"}
 DEFAULT_PROTOCOL = "2024-11-05"
-
-# 把 chat.TOOLS（OpenAI 格式）转成 MCP 的 {name, description, inputSchema}
-MCP_TOOLS = [
-    {
-        "name": t["function"]["name"],
-        "description": t["function"]["description"],
-        "inputSchema": t["function"]["parameters"],
-    }
-    for t in chat.TOOLS
-]
 
 
 def _send(obj: dict) -> None:
@@ -67,14 +57,14 @@ def _handle(msg: dict) -> None:
         return
 
     if method == "tools/list":
-        _result(rid, {"tools": MCP_TOOLS})
+        _result(rid, {"tools": tools_mod.mcp_tools("mcp")})
         return
 
     if method == "tools/call":
         params = msg.get("params") or {}
         name = params.get("name", "")
         args = params.get("arguments") or {}
-        data = chat._exec_tool(name, args)
+        data = tools_mod.execute(name, args, surface="mcp")
         is_error = isinstance(data, dict) and "error" in data
         _result(rid, {
             "content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False)}],
