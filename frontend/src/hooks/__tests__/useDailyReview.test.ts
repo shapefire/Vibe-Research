@@ -9,6 +9,8 @@ vi.mock("@/lib/api", () => ({
     turnoverTop: vi.fn().mockResolvedValue({ stocks: [] }),
     indices: vi.fn().mockResolvedValue([]),
     globalIndices: vi.fn().mockResolvedValue([]),
+    digestLatest: vi.fn().mockResolvedValue(null),
+    reviewLatest: vi.fn().mockResolvedValue(null),
   },
   ApiError: class ApiError extends Error {
     status: number;
@@ -28,7 +30,7 @@ describe("useDailyReview", () => {
     vi.clearAllMocks();
   });
 
-  it("triggers 5 API calls on mount", async () => {
+  it("triggers 6 API calls on mount", async () => {
     renderHook(() => useDailyReview());
     await waitFor(() => {
       expect(mockedApi.marketOverview).toHaveBeenCalled();
@@ -36,6 +38,7 @@ describe("useDailyReview", () => {
       expect(mockedApi.turnoverTop).toHaveBeenCalled();
       expect(mockedApi.indices).toHaveBeenCalled();
       expect(mockedApi.globalIndices).toHaveBeenCalled();
+      expect(mockedApi.reviewLatest).toHaveBeenCalled();
     });
   });
 
@@ -50,6 +53,7 @@ describe("useDailyReview", () => {
       expect(mockedApi.turnoverTop).toHaveBeenCalled();
       expect(mockedApi.indices).toHaveBeenCalled();
       expect(mockedApi.globalIndices).toHaveBeenCalled();
+      expect(mockedApi.reviewLatest).toHaveBeenCalled();
     });
   });
 });

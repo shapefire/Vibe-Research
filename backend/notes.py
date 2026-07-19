@@ -387,8 +387,118 @@ def migrate_notes(notes: list[dict]) -> dict:
     return {"imported": imported, "skipped": skipped, "total": total}
 
 
-def create_from_digest(digest: dict) -> dict:
-    """为 06 每日摘要预留：将 digest 写入 kind=数据摘要 笔记。"""
-    title = str(digest.get("title", "数据摘要"))
-    content = str(digest.get("content", ""))
-    return add_note(kind="数据摘要", title=title, content=content, snapshot=digest.get("snapshot"))
+def create_from_digest(digest_obj) -> dict:
+    """将每日摘要写入 kind=摘要 笔记；同 date 幂等 upsert。"""
+    if hasattr(digest_obj, "to_markdown"):
+        content = digest_obj.to_markdown()
+        date = digest_obj.date
+        snapshot = {
+            "date": digest_obj.date,
+            "generated_at": digest_obj.generated_at,
+            "market": digest_obj.market,
+            "watchlist_summary": digest_obj.watchlist_summary,
+            "portfolio_summary": digest_obj.portfolio_summary,
+            "intel_summary": digest_obj.intel_summary,
+        }
+    elif isinstance(digest_obj, dict):
+        content = str(digest_obj.get("content", ""))
+        date = str(digest_obj.get("date", ""))
+        snapshot = digest_obj.get("snapshot")
+    else:
+        raise NoteError("digest 格式无效")
+
+    if not date:
+        raise NoteError("digest 缺少 date")
+    title = f"每日数据摘要 {date}"
+    nid = f"digest-{date}"
+    _validate_fields("摘要", title, content)
+
+    with _LOCK:
+        data = _load_index()
+        items = data.setdefault("items", [])
+        existing = next((i for i in items if i.get("id") == nid), None)
+        ts_val = int(time.time() * 1000)
+        if existing:
+            existing["title"] = title
+            existing["kind"] = "摘要"
+            existing["tags"] = _validate_tags(["digest"])
+            existing["snapshot"] = snapshot if isinstance(snapshot, dict) else None
+            _save_content(nid, content)
+            _save_index(data)
+            return {k: v for k, v in existing.items() if k != "snapshot"}
+
+        _enforce_capacity(items)
+        meta = NoteMeta(
+            id=nid,
+            kind="摘要",
+            title=title,
+            ts=ts_val,
+            tags=_validate_tags(["digest"]),
+            snapshot=snapshot if isinstance(snapshot, dict) else None,
+        )
+        _save_content(nid, content)
+        items.insert(0, _meta_to_dict(meta))
+        _save_index(data)
+    return _meta_to_dict(meta)
+
+
+def create_from_scheduled_review(digest_obj, content: str) -> dict:
+    """定时 AI 复盘写入 kind=复盘 笔记；同 date 幂等 upsert。"""
+    if not hasattr(digest_obj, "date"):
+        raise NoteError("digest 格式无效")
+    date = digest_obj.date
+    title = f"定时复盘 {date}"
+    nid = f"review-{date}"
+    _validate_fields("复盘", title, content)
+    snapshot = {
+        "date": digest_obj.date,
+        "generated_at": digest_obj.generated_at,
+        "market": digest_obj.market,
+        "watchlist_summary": digest_obj.watchlist_summary,
+        "portfolio_summary": digest_obj.portfolio_summary,
+        "intel_summary": digest_obj.intel_summary,
+        "source": "scheduled",
+    }
+
+    with _LOCK:
+        data = _load_index()
+        items = data.setdefault("items", [])
+        existing = next((i for i in items if i.get("id") == nid), None)
+        ts_val = int(time.time() * 1000)
+        if existing:
+            existing["title"] = title
+            existing["kind"] = "复盘"
+            existing["tags"] = _validate_tags(["scheduled", "digest"])
+            existing["snapshot"] = snapshot
+            _save_content(nid, content)
+            _save_index(data)
+            return {k: v for k, v in existing.items() if k != "snapshot"}
+
+        _enforce_capacity(items)
+        meta = NoteMeta(
+            id=nid,
+            kind="复盘",
+            title=title,
+            ts=ts_val,
+            tags=_validate_tags(["scheduled", "digest"]),
+            snapshot=snapshot,
+        )
+        _save_content(nid, content)
+        items.insert(0, _meta_to_dict(meta))
+        _save_index(data)
+    return _meta_to_dict(meta)
+
+
+def get_scheduled_review(date: str) -> dict | None:
+    """读取指定日期的定时复盘笔记（review-{date}）；不存在返回 None。"""
+    nid = f"review-{date}"
+    try:
+        _validate_id(nid)
+    except NoteError:
+        return None
+    if get_meta(nid) is None:
+        return None
+    try:
+        return get_note(nid)
+    except NoteError:
+        return None

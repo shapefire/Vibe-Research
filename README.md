@@ -146,6 +146,23 @@ docker compose -f docker/docker-compose.yml up --build
 
 开发者架构说明见 [`docs/architecture/README.md`](docs/architecture/README.md)。
 
+### 方式 C · GitHub Actions 定时摘要（零服务器）
+
+工作日北京时间 18:00 自动生成**纯数据摘要**（大盘 / 自选股 / 资讯统计），可选再跑 AI 复盘并推送到飞书 / 企业微信，无需常驻服务器。
+
+1. Fork 本仓库，在 **Settings → Secrets / Variables** 配置：
+   - `VR_WATCHLIST_JSON`：与 `watchlist.json` 相同结构的 JSON（可选）
+   - `VR_DASHBOARD_URL`：推送消息中的看板链接
+   - `VR_NOTIFY_*`：见 [`docs/notify-setup.md`](docs/notify-setup.md)
+   - Repository variable `VR_NOTIFY_ENABLED=true` 才会执行 Notify 步骤
+2. 在 **Actions → Daily Digest** 手动 `workflow_dispatch` 验证，或等待 cron 触发。
+3. 本地手动生成：`cd backend && python jobs/daily_digest.py`
+4. 单独推送：`cd backend && python -m notify --digest today` / `--test --provider wecom`
+
+摘要写入 `VR_DATA_DIR/digests/{date}.json`；若开启 LLM 则另存 `review-{date}` 复盘笔记。推送优先使用复盘 brief，否则退回纯数据摘要。看板「接入 AI」页可配置 Webhook（写入服务端 `notify.json`）。
+
+环境变量见 [`backend/.env.example`](backend/.env.example) 中 `VR_SCHEDULER_*` / `VR_DIGEST_*` / `VR_NOTIFY_*` 段落。
+
 ## 🔌 接入 AI
 
 在「接入 AI」页配置一次，全站的「问 AI / 复盘 / 今日要点」就都用你自己的模型。**分析都由你的模型给出，本产品不校准、无倾向。** 三种方式：

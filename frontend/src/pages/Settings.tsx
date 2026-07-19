@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { loadLlm, saveLlm, clearLlm } from "@/lib/llm";
 import { loadAccessKey, saveAccessKey } from "@/lib/api";
 import { subscriptionModels, apiModels, PROVIDER_BASE, isCliProvider, aiModels, type ProviderId } from "@/lib/ai-models";
+import { NotifySettingsCard } from "./Settings/NotifySettingsCard";
 
 export function Settings() {
   const existing = loadLlm();
@@ -203,6 +204,8 @@ export function Settings() {
           </button>
         </div>
       </GlassCard>
+
+      <NotifySettingsCard />
     </div>
   );
 }

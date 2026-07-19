@@ -281,3 +281,46 @@ describe("downloadReport", () => {
     await expect(downloadReport("x", "f.pdf")).rejects.toMatchObject({ status: 404 });
   });
 });
+
+describe("api.reviewLatest", () => {
+  beforeEach(() => {
+    saveAccessKey("");
+    vi.restoreAllMocks();
+  });
+
+  it("returns null on 404", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ detail: "暂无定时复盘" }),
+    }));
+    expect(await api.reviewLatest()).toBeNull();
+  });
+});
+
+describe("api.digestLatest", () => {
+  beforeEach(() => {
+    saveAccessKey("");
+    vi.restoreAllMocks();
+  });
+
+  it("returns null on 404", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ detail: "暂无摘要" }),
+    }));
+    const result = await api.digestLatest();
+    expect(result).toBeNull();
+  });
+
+  it("returns digest payload on success", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ date: "2026-07-12", market: {} }),
+    }));
+    const result = await api.digestLatest();
+    expect(result?.date).toBe("2026-07-12");
+  });
+});

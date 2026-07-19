@@ -117,7 +117,7 @@ export async function downloadReport(id: string, name: string): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-async function request<T>(path: string, method: "GET" | "POST" | "DELETE" = "GET", body?: unknown): Promise<T> {
+async function request<T>(path: string, method: "GET" | "POST" | "DELETE" | "PUT" = "GET", body?: unknown): Promise<T> {
   let resp: Response;
   const headers: Record<string, string> = { ...authHeaders() };
   const opts: RequestInit = { method };
@@ -376,6 +376,89 @@ export interface HealthSources {
   updated_at: string;
 }
 
+export interface DigestIndex {
+  close: number | null;
+  change_pct: number | null;
+}
+
+export interface DigestWatchlistItem {
+  code: string;
+  name: string;
+  change_pct: number | null;
+  pe?: number | null;
+}
+
+export interface DailyDigest {
+  version?: number;
+  date: string;
+  market: {
+    sh_index: DigestIndex;
+    sz_index: DigestIndex;
+    global: Record<string, DigestIndex>;
+    sentiment: {
+      up_count: number | null;
+      down_count: number | null;
+      limit_up: number | null;
+      limit_down: number | null;
+    };
+  };
+  watchlist_summary: {
+    total: number;
+    up: number;
+    down: number;
+    flat?: number;
+    unconfigured: boolean;
+    items: DigestWatchlistItem[];
+  };
+  portfolio_summary: { total_pnl_pct: number | null; items: { code: string; pnl_pct: number | null }[] } | null;
+  intel_summary: { new_items: number; tracks: { name: string; count: number }[] };
+  generated_at: string;
+  errors?: { section: string; message: string }[];
+}
+
+async function digestLatest(): Promise<DailyDigest | null> {
+  try {
+    return await get<DailyDigest>("/digest/latest");
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+async function reviewLatest(date?: string): Promise<NoteDetail | null> {
+  try {
+    const q = date ? `?date=${encodeURIComponent(date)}` : "";
+    return await get<NoteDetail>(`/review/latest${q}`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export interface NotifyChannelStatus {
+  provider: string;
+  display_name: string;
+  enabled: boolean;
+  configured: boolean;
+  webhook_masked: string | null;
+  last_sent: string | null;
+  last_error: string | null;
+}
+
+export interface NotifyStatus {
+  enabled: boolean;
+  dashboard_url: string;
+  channels: NotifyChannelStatus[];
+}
+
+export interface NotifyResultRow {
+  provider_id: string;
+  ok: boolean;
+  error: string | null;
+  latency_ms: number;
+  skipped: boolean;
+}
+
 export const api = {
   health: () => get<{ ok: boolean }>("/health"),
   healthSources: () => requestFull<HealthSources>("/health/sources"),
@@ -438,4 +521,11 @@ export const api = {
     get<NoteByTagList>(`/notes/by-tag?tag=${encodeURIComponent(tag)}&has_snapshot=${hasSnapshot}&limit=${limit}`),
   compareNotes: (id_a: string, id_b: string) =>
     request<CompareResult>("/notes/compare", "POST", { id_a, id_b }),
+  digestLatest,
+  reviewLatest,
+  notifyProviders: () => get<{ providers: { id: string; name: string }[] }>("/notify/providers"),
+  notifyStatus: () => get<NotifyStatus>("/notify/status"),
+  notifyTest: (provider?: string) =>
+    request<{ results: NotifyResultRow[] }>("/notify/test", "POST", provider ? { provider } : {}),
+  notifyUpdateConfig: (body: unknown) => request<NotifyStatus>("/notify/config", "PUT", body),
 };

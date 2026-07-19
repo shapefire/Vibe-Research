@@ -169,3 +169,24 @@ def get_radar(force: bool = False) -> dict:
     if force:
         return fetch_radar()
     return load_cache() or skeleton()
+
+
+def get_cache_stats(digest_date: str | None = None) -> dict:
+    """资讯缓存统计：相对 digest 日 0 点（上海）计数各赛道条目。"""
+    data = load_cache() or skeleton()
+    tz = BEIJING
+    if digest_date:
+        day = datetime.strptime(digest_date, "%Y-%m-%d").replace(tzinfo=tz)
+    else:
+        day = datetime.now(tz)
+    cutoff_ts = int(day.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+
+    tracks: list[dict] = []
+    new_items = 0
+    for ind in data.get("industries") or []:
+        items = ind.get("items") or []
+        count = sum(1 for it in items if int(it.get("ts") or 0) >= cutoff_ts)
+        tracks.append({"name": ind.get("name", ""), "count": count})
+        new_items += count
+    tracks.sort(key=lambda x: x["count"], reverse=True)
+    return {"new_items": new_items, "tracks": tracks}

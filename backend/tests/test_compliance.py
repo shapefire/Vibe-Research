@@ -105,6 +105,9 @@ def test_digest_template_compliant():
     assert DIGEST_FOOTER == "*纯数据摘要，不构成投资建议*"
 
 
-@pytest.mark.skip(reason="待 feat 07 notify.py 实现后启用")
 def test_push_template_compliant():
+    from notify.render import FOOTER
+
     assert PUSH_FOOTER == "*纯数据摘要，不构成投资建议*"
+    assert "不构成投资建议" in FOOTER
+    assert_compliant(FOOTER, context="notify_footer")

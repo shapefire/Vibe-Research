@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,7 @@ import astock
 import chat as chat_layer
 import cli_runtime
 import compare as compare_mod
+import digest as digest_mod
 from data_fetcher.base import AllSourcesFailed, FetchResult
 from data_fetcher.registry import registry
 import gstock
@@ -34,13 +36,47 @@ import portfolio as pf
 import market
 import myreports as mr
 import notes as notes_mod
+from env_loader import load_env_file
+
+_env_file_loaded = load_env_file()
 
 app = FastAPI(title="Vibe-Research API", version="0.1.3")
 
 _log = logging.getLogger("vibe-research")
 
-# 每半小时后台刷新持仓数据
-pf.start_scheduler(1800)
+_scheduler = None
+if os.getenv("VR_SCHEDULER_ENABLED", "true").lower() == "true":
+    from scheduler import Scheduler
+    from jobs import daily_digest as daily_digest_job
+    from jobs import portfolio_refresh as portfolio_refresh_job
+    from jobs import radar_cache_warm as radar_cache_warm_job
+
+    _tz = os.getenv("VR_DIGEST_TIMEZONE", "Asia/Shanghai")
+    _digest_time = os.getenv("VR_DIGEST_TIME", "18:00").strip()
+    _jobs = os.getenv("VR_JOBS", "portfolio_refresh,daily_digest")
+    _scheduler = Scheduler(timezone=_tz)
+    _scheduler.register(portfolio_refresh_job.spec())
+    _scheduler.register(daily_digest_job.spec())
+    _scheduler.register(radar_cache_warm_job.spec())
+    _scheduler.start()
+    _log.info(
+        "scheduler enabled timezone=%s digest_time=%s jobs=%s",
+        _tz,
+        _digest_time,
+        _jobs,
+    )
+    print(
+        f"[vibe-research] scheduler started · timezone={_tz} · digest_time={_digest_time} · jobs={_jobs}",
+        file=sys.stderr,
+    )
+else:
+    print("[vibe-research] scheduler disabled (VR_SCHEDULER_ENABLED=false)", file=sys.stderr)
+
+if not _env_file_loaded:
+    print(
+        "[vibe-research] backend/.env not found — using system env / defaults only",
+        file=sys.stderr,
+    )
 
 # CORS：默认放开（本地自托管友好）；公网部署时用 VR_ALLOW_ORIGINS 收紧成白名单。
 #   例：VR_ALLOW_ORIGINS="https://myhost"  （逗号分隔多个）
@@ -48,7 +84,7 @@ _ORIGINS = [o.strip() for o in os.environ.get("VR_ALLOW_ORIGINS", "*").split(","
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ORIGINS,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -440,6 +476,209 @@ def portfolio_refresh():
         return {"data": pf.get_portfolio()}
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"刷新失败：{e}") from e
+
+
+_JOB_URL_MAP = {
+    "daily-digest": "daily_digest",
+    "portfolio-refresh": "portfolio_refresh",
+    "radar-cache-warm": "radar_cache_warm",
+}
+
+
+def _digest_to_dict(d: digest_mod.DailyDigest) -> dict:
+    from dataclasses import asdict
+
+    return asdict(d)
+
+
+@app.get("/api/review/latest")
+def review_latest(date: str | None = Query(None, description="YYYY-MM-DD，默认今天（上海）")):
+    """返回定时 AI 复盘笔记（review-{date}）。"""
+    d = date or digest_mod.today_shanghai()
+    note = notes_mod.get_scheduled_review(d)
+    if not note:
+        raise HTTPException(404, "暂无定时复盘")
+    return note
+
+
+@app.get("/api/review/{date}")
+def review_by_date(date: str):
+    note = notes_mod.get_scheduled_review(date)
+    if not note:
+        raise HTTPException(404, "暂无定时复盘")
+    return note
+
+
+@app.get("/api/digest/latest")
+def digest_latest():
+    d = digest_mod.load_latest()
+    if not d:
+        raise HTTPException(404, "暂无摘要")
+    return _digest_to_dict(d)
+
+
+@app.get("/api/digest/{date}")
+def digest_by_date(date: str):
+    d = digest_mod.load(date)
+    if not d:
+        raise HTTPException(404, "暂无摘要")
+    return _digest_to_dict(d)
+
+
+class NotifyTestBody(BaseModel):
+    provider: str | None = None
+
+
+class NotifyConfigBody(BaseModel):
+    enabled: bool | None = None
+    dashboard_url: str | None = None
+    channels: list[dict] | None = None
+
+
+def _require_mutating_auth(request: Request) -> None:
+    """PUT/POST notify：若配置了 VR_API_KEY 则必须匹配（与全局中间件一致，双保险）。"""
+    if _API_KEY and request.headers.get("authorization", "") != f"Bearer {_API_KEY}":
+        raise HTTPException(401, "未授权：缺少或错误的 API Key（VR_API_KEY）")
+
+
+@app.get("/api/notify/providers")
+def notify_providers():
+    from notify.registry import ProviderRegistry
+    import notify.providers  # noqa: F401
+
+    return {"providers": ProviderRegistry.list_providers()}
+
+
+@app.get("/api/notify/status")
+def notify_status():
+    from notify.service import status_payload
+
+    return status_payload()
+
+
+@app.post("/api/notify/test")
+def notify_test(request: Request, body: NotifyTestBody | None = None):
+    _require_mutating_auth(request)
+    from notify.service import NotifyService
+    from notify.registry import ProviderRegistry
+    import notify.providers  # noqa: F401
+
+    provider = body.provider if body else None
+    if provider and ProviderRegistry.get(provider) is None:
+        raise HTTPException(400, f"未知 provider：{provider}")
+    svc = NotifyService()
+    cfg = svc._loader()
+    if not cfg.get("enabled") and not provider:
+        raise HTTPException(503, "推送总开关未开启")
+    results = svc.send_test(provider)
+    return {
+        "results": [
+            {
+                "provider_id": r.provider_id,
+                "ok": r.ok,
+                "error": r.error,
+                "latency_ms": r.latency_ms,
+                "skipped": r.skipped,
+            }
+            for r in results
+        ]
+    }
+
+
+@app.put("/api/notify/config")
+def notify_config_put(request: Request, body: NotifyConfigBody):
+    _require_mutating_auth(request)
+    from notify import config as notify_cfg
+    from notify.registry import ProviderRegistry
+    from notify.service import status_payload
+    import notify.providers  # noqa: F401
+
+    raw = body.model_dump(exclude_none=True)
+    current = notify_cfg.load_config()
+    merged = notify_cfg.merge_put_body(current, raw)
+
+    errs: dict[str, list[str]] = {}
+    dash_errs = notify_cfg.validate_dashboard_url(merged.get("dashboard_url") or "")
+    if dash_errs:
+        errs["dashboard_url"] = dash_errs
+    for ch in merged.get("channels") or []:
+        pid = ch.get("provider")
+        if not pid:
+            continue
+        prov = ProviderRegistry.get(pid)
+        if not prov:
+            errs[pid] = ["未知 provider"]
+            continue
+        if ch.get("enabled") and ch.get("webhook_url"):
+            ve = prov.validate_config(ch)
+            if ve:
+                errs[pid] = ve
+        elif ch.get("enabled") and not ch.get("webhook_url"):
+            errs[pid] = ["缺少 webhook_url"]
+    if errs:
+        raise HTTPException(400, {"detail": "配置校验失败", "errors": errs})
+
+    notify_cfg.save_config(merged)
+    return status_payload()
+
+
+@app.get("/api/jobs/status")
+def jobs_status():
+    enabled = os.getenv("VR_SCHEDULER_ENABLED", "true").lower() == "true"
+    tz = os.getenv("VR_DIGEST_TIMEZONE", "Asia/Shanghai")
+    jobs = _scheduler.get_status() if _scheduler else []
+    return {"scheduler_enabled": enabled, "timezone": tz, "jobs": jobs}
+
+
+class JobRunBody(BaseModel):
+    date: str | None = None
+
+
+@app.post("/api/jobs/{name}/run")
+def jobs_run(name: str, body: JobRunBody | None = None):
+    internal = _JOB_URL_MAP.get(name)
+    if not internal:
+        raise HTTPException(404, f"未知 job：{name}")
+    if _scheduler and _scheduler.is_job_running(internal):
+        raise HTTPException(409, f"job {name} 正在运行")
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(os.getenv("VR_DIGEST_TIMEZONE", "Asia/Shanghai"))
+    started = datetime.now(tz)
+    try:
+        if internal == "daily_digest":
+            from jobs import daily_digest as daily_digest_job
+
+            d = daily_digest_job.run(body.date if body else None)
+            path = digest_mod.DIGESTS_DIR / f"{d.date}.json"
+            result = {"date": d.date, "digest_path": str(path), "note_id": f"digest-{d.date}"}
+        elif internal == "portfolio_refresh":
+            from jobs import portfolio_refresh as portfolio_refresh_job
+
+            portfolio_refresh_job.run()
+            result = {"job": internal}
+        elif internal == "radar_cache_warm":
+            from jobs import radar_cache_warm as radar_cache_warm_job
+
+            radar_cache_warm_job.run()
+            result = {"job": internal}
+        else:
+            raise HTTPException(404, f"未知 job：{name}")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"job 执行失败：{e}") from e
+    finished = datetime.now(tz)
+    duration_ms = int((finished - started).total_seconds() * 1000)
+    return {
+        "job": name,
+        "status": "success",
+        "started_at": started.isoformat(),
+        "finished_at": finished.isoformat(),
+        "duration_ms": duration_ms,
+        "result": result,
+    }
 
 
 @app.get("/api/radar")

@@ -262,6 +262,30 @@ def run_chat_cli(cfg: dict, user_messages: list, context: str = "") -> dict:
     return {"content": content, "trace": [], "rounds": 1}
 
 
+REVIEW_SYSTEM_PROMPT = """你是 Vibe-Research 里的投研助理。用户会提供当天 A 股客观盘面数据，请据此做复盘。
+
+硬性规则（务必遵守）：
+- 只做信息整理、数据解读与多视角分析；不推荐任何具体买卖、不预测涨跌与价位、不给买卖时机、不承诺收益、不打分排名。
+- 不要编造数字；数据以用户提供的为准。
+- 用简洁中文回答。
+
+当前数据上下文：
+{context}"""
+
+
+def run_review_chat(cfg: dict, user_content: str, context: str = "") -> str:
+    """定时复盘专用：数据已在 context，不走 function calling。"""
+    if str(cfg.get("provider", "")).startswith("cli-"):
+        result = run_chat_cli(cfg, [{"role": "user", "content": user_content}], context=context)
+        return result.get("content") or ""
+    messages = [
+        {"role": "system", "content": REVIEW_SYSTEM_PROMPT.format(context=context or "（无）")},
+        {"role": "user", "content": user_content},
+    ]
+    data = _call_llm(cfg, messages, use_tools=False)
+    return data["choices"][0]["message"].get("content") or ""
+
+
 # ---------------------------------------------------------------------------
 # 流式版：yield 事件字典 {type: tool|delta|done|error}，供 /api/chat 以 NDJSON 推给前端
 # ---------------------------------------------------------------------------

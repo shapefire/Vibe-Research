@@ -16,7 +16,6 @@ import os
 import shutil
 import sys
 import threading
-import time
 from datetime import datetime, timezone, timedelta
 
 import astock
@@ -178,15 +177,3 @@ def _refresh_snapshot() -> None:
         d = _load()
         d["last_refresh"] = _now()
         _save(d)
-
-
-def start_scheduler(interval: int = 1800) -> None:
-    """每半小时后台刷新一次持仓数据（daemon 线程）。"""
-    def loop():
-        while True:
-            time.sleep(interval)
-            try:
-                _refresh_snapshot()
-            except Exception:
-                pass
-    threading.Thread(target=loop, daemon=True).start()
