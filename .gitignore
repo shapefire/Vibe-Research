@@ -36,3 +36,7 @@ frontend/tsconfig.tsbuildinfo
 *.log
 .vscode/
 .idea/
+
+# Git worktrees (local checkouts)
+.worktrees/
+
