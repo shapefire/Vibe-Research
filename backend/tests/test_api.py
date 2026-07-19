@@ -163,3 +163,67 @@ def test_spa_fallback_does_not_override_api():
     r = client.get("/api/health")
     assert r.status_code == 200
     assert r.json()["ok"] is True
+
+
+def _patch_watchlist_dir(tmp_path, monkeypatch):
+    import watchlist as wl
+
+    monkeypatch.setenv("VR_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(wl, "CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(wl, "WL_FILE", str(tmp_path / "watchlist.json"))
+    monkeypatch.setattr(wl, "WATCHLIST_FILE", str(tmp_path / "watchlist.json"))
+
+
+def test_watchlist_empty_get(tmp_path, monkeypatch):
+    _patch_watchlist_dir(tmp_path, monkeypatch)
+    r = client.get("/api/watchlist")
+    assert r.status_code == 200
+    body = r.json()["data"]
+    assert body["items"] == []
+    assert body["total"] == 0
+
+
+def test_watchlist_post_raw_and_delete(tmp_path, monkeypatch):
+    _patch_watchlist_dir(tmp_path, monkeypatch)
+    r = client.post("/api/watchlist", json={"raw": "600519, AAPL, 00700"})
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["added"] == 3
+    assert data["total"] == 3
+
+    r2 = client.delete("/api/watchlist/AAPL")
+    assert r2.status_code == 200
+    assert r2.json()["data"]["removed"] is True
+    assert r2.json()["data"]["total"] == 2
+
+    r3 = client.delete("/api/watchlist/AAPL")
+    assert r3.status_code == 200
+    assert r3.json()["data"]["removed"] is False
+
+
+def test_watchlist_post_mutex_and_migrate(tmp_path, monkeypatch):
+    _patch_watchlist_dir(tmp_path, monkeypatch)
+    r = client.post("/api/watchlist", json={"symbols": ["600519"], "raw": "000001"})
+    assert r.status_code == 400
+
+    r2 = client.post("/api/watchlist/migrate", json={"codes": ["600519", "000001"]})
+    assert r2.status_code == 200
+    assert r2.json()["data"]["migrated"] == 2
+
+
+def test_watchlist_cap_400(tmp_path, monkeypatch):
+    _patch_watchlist_dir(tmp_path, monkeypatch)
+    monkeypatch.setenv("VR_WATCHLIST_MAX", "1")
+    assert client.post("/api/watchlist", json={"symbols": ["600519"]}).status_code == 200
+    r = client.post("/api/watchlist", json={"symbols": ["000001"]})
+    assert r.status_code == 400
+
+
+def test_watchlist_requires_api_key(tmp_path, monkeypatch):
+    _patch_watchlist_dir(tmp_path, monkeypatch)
+    monkeypatch.setattr(app_module, "_API_KEY", "secret-key")
+    r = client.get("/api/watchlist")
+    assert r.status_code == 401
+    r2 = client.get("/api/watchlist", headers={"Authorization": "Bearer secret-key"})
+    assert r2.status_code == 200
+    monkeypatch.setattr(app_module, "_API_KEY", "")

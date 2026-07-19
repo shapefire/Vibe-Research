@@ -483,6 +483,24 @@ export interface NotifyResultRow {
   skipped: boolean;
 }
 
+export type WatchMarket = "a-share" | "us" | "hk" | "kr";
+
+export interface WatchItem {
+  symbol: string;
+  market: WatchMarket;
+  added_at?: string;
+  note?: string;
+}
+
+export interface WatchlistResponse {
+  items: WatchItem[];
+  total: number;
+  updated_at?: string;
+  added?: number;
+  migrated?: number;
+  removed?: boolean;
+}
+
 export const api = {
   health: () => get<{ ok: boolean }>("/health"),
   healthSources: () => requestFull<HealthSources>("/health/sources"),
@@ -552,4 +570,13 @@ export const api = {
   notifyTest: (provider?: string) =>
     request<{ results: NotifyResultRow[] }>("/notify/test", "POST", provider ? { provider } : {}),
   notifyUpdateConfig: (body: unknown) => request<NotifyStatus>("/notify/config", "PUT", body),
+  watchlist: () => get<WatchlistResponse>("/watchlist"),
+  watchlistAdd: (body: { symbols?: string[]; raw?: string }) =>
+    request<WatchlistResponse>("/watchlist", "POST", body),
+  watchlistReplace: (items: WatchItem[]) =>
+    request<WatchlistResponse>("/watchlist", "PUT", { items }),
+  watchlistRemove: (symbol: string) =>
+    request<WatchlistResponse>(`/watchlist/${encodeURIComponent(symbol)}`, "DELETE"),
+  watchlistMigrate: (codes: string[]) =>
+    request<WatchlistResponse>("/watchlist/migrate", "POST", { codes }),
 };

@@ -36,6 +36,7 @@ import portfolio as pf
 import market
 import myreports as mr
 import notes as notes_mod
+import watchlist as watchlist_mod
 from env_loader import load_env_file
 
 _env_file_loaded = load_env_file()
@@ -247,6 +248,86 @@ def portfolio_add(h: HoldingIn):
 @app.delete("/api/portfolio/holding")
 def portfolio_remove(code: str = Query(...)):
     return {"data": pf.remove_holding(code.strip())}
+
+
+# ---- 自选股（服务端持久化，供前端 / digest / GHA 共用）----
+
+class WatchlistPostIn(BaseModel):
+    symbols: list[str] | None = None
+    raw: str | None = None
+
+
+class WatchlistPutIn(BaseModel):
+    items: list[dict]
+
+
+class WatchlistMigrateIn(BaseModel):
+    codes: list[str]
+
+
+def _watchlist_http(exc: Exception) -> None:
+    if isinstance(exc, watchlist_mod.WatchlistConflict):
+        raise HTTPException(409, str(exc)) from exc
+    if isinstance(exc, watchlist_mod.CapacityExceeded):
+        raise HTTPException(400, str(exc)) from exc
+    if isinstance(exc, watchlist_mod.WatchlistError):
+        raise HTTPException(400, str(exc)) from exc
+    raise HTTPException(502, f"自选股读写异常：{exc}") from exc
+
+
+@app.get("/api/watchlist")
+def watchlist_get():
+    try:
+        return {"data": watchlist_mod.get_state()}
+    except Exception as e:  # noqa: BLE001
+        _watchlist_http(e)
+
+
+@app.post("/api/watchlist")
+def watchlist_post(body: WatchlistPostIn):
+    has_sym = body.symbols is not None
+    has_raw = body.raw is not None and str(body.raw).strip() != ""
+    if has_sym and has_raw:
+        raise HTTPException(400, "symbols 与 raw 不能同时提供")
+    if not has_sym and not has_raw:
+        raise HTTPException(400, "symbols 与 raw 至少提供一个")
+    try:
+        if has_raw:
+            items, added = watchlist_mod.add_raw(body.raw or "")
+        else:
+            items, added = watchlist_mod.add_symbols(body.symbols or [])
+        return {"data": {"items": items, "added": added, "total": len(items)}}
+    except Exception as e:  # noqa: BLE001
+        _watchlist_http(e)
+
+
+@app.put("/api/watchlist")
+def watchlist_put(body: WatchlistPutIn):
+    try:
+        items = watchlist_mod.replace_all(body.items)
+        return {"data": {"items": items, "total": len(items)}}
+    except Exception as e:  # noqa: BLE001
+        _watchlist_http(e)
+
+
+@app.delete("/api/watchlist/{symbol}")
+def watchlist_delete(symbol: str):
+    try:
+        from urllib.parse import unquote
+
+        items, removed = watchlist_mod.remove(unquote(symbol))
+        return {"data": {"items": items, "total": len(items), "removed": removed}}
+    except Exception as e:  # noqa: BLE001
+        _watchlist_http(e)
+
+
+@app.post("/api/watchlist/migrate")
+def watchlist_migrate(body: WatchlistMigrateIn):
+    try:
+        items, migrated = watchlist_mod.migrate(body.codes)
+        return {"data": {"items": items, "migrated": migrated, "total": len(items)}}
+    except Exception as e:  # noqa: BLE001
+        _watchlist_http(e)
 
 
 # ---- 我的研报（用户上传自己的研报，存本地、不上传、不进开源仓库）----

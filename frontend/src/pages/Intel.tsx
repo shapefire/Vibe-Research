@@ -8,7 +8,7 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { Disclaimer } from "@/components/ui/Disclaimer";
 import { SaveNoteButton } from "@/components/ui/SaveNoteButton";
 import { api, ApiError, type RadarData, type Industry, type Announcement, type NewsItem } from "@/lib/api";
-import { loadWatch } from "@/lib/watchlist";
+import { loadWatch, migrateIfNeeded, aShareSymbols } from "@/lib/watchlist";
 import { hasLlm, chatStream } from "@/lib/llm";
 import { cn } from "@/lib/utils";
 
@@ -186,7 +186,7 @@ interface FeedRow { code: string; name: string; when: string; title: string; met
 const MAX_ROWS = 60;
 
 function WatchlistFeed({ kind }: { kind: "filings" | "news" }) {
-  const [codes, setCodes] = useState<string[]>(loadWatch);
+  const [codes, setCodes] = useState<string[]>([]);
   const [rows, setRows] = useState<FeedRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -242,9 +242,37 @@ function WatchlistFeed({ kind }: { kind: "filings" | "news" }) {
     }
   }, [kind]);
 
-  useEffect(() => { const cs = loadWatch(); setCodes(cs); load(cs); }, [load]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await migrateIfNeeded();
+        const items = await loadWatch();
+        const cs = aShareSymbols(items);
+        if (cancelled) return;
+        setCodes(cs);
+        await load(cs);
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : "加载自选失败");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [load]);
 
-  const refresh = () => { const cs = loadWatch(); setCodes(cs); load(cs); };
+  const refresh = () => {
+    void (async () => {
+      try {
+        const items = await loadWatch();
+        const cs = aShareSymbols(items);
+        setCodes(cs);
+        await load(cs);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "加载自选失败");
+      }
+    })();
+  };
 
   if (!codes.length) {
     return (
